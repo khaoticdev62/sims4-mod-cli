@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=42.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sims4-mod-cli"
+version = "0.1.0-dev"
+description = "Portable Sims 4 Mod Construction CLI with Hermes-style TUI and slot-n-lock pipeline."
+readme = "readme.txt"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Khaotic Labs", email = "khaoticdev62@users.noreply.github.com"},
+]
+keywords = ["sims4", "modding", "cli", "pipeline"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pyinstaller"]
+
+[project.urls]
+Homepage = "https://github.com/khaoticdev62/sims4-mod-cli"
+Repository = "https://github.com/khaoticdev62/sims4-mod-cli"
+
+[tool.setuptools]
+py-modules = ["s4mod_cli"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["s4mod_cli*"]
+
+[project.scripts]
+s4mod_cli = "s4mod_cli:main"

@@ -260,6 +260,19 @@ C_YELLOW = "\033[1;33m"
 C_BLUE = "\033[1;34m"
 
 
+def _fnv1a_64(text: str) -> int:
+    h = 0xCBF29CE484222325
+    for b in text.encode("utf-8"):
+        h = (h ^ b) * 0x100000001B3
+        h &= 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def _tuning_instance(name: str, suffix: str = "") -> str:
+    seed = f"{name}{suffix}"
+    return hex(_fnv1a_64(seed) & 0x7FFFFFFFFFFFFFFF)
+
+
 def _status_label(ok: bool, text: str) -> str:
     return f"{C_GREEN}[OK]{C_RESET} {text}" if ok else f"{C_RED}[FAIL]{C_RESET} {text}"
 
@@ -930,6 +943,25 @@ def dependency_notes(mod_type: str) -> list[str]:
     return items
 
 
+TUNING_TAG_RULES = {
+    "career": ["career_name", "entry_level", "career_levels"],
+    "trait": ["trait_name", "trait_description"],
+    "buff": ["buff_name", "buff_description", "mood_type"],
+    "interaction": ["interaction_name", "display_name"],
+    "event": ["label", "description", "event_type"],
+    "achievement": ["achievement_name", "description"],
+    "aspiration": ["aspiration_name", "description"],
+    "whim": ["whim_name", "description"],
+    "club": ["club_name", "description"],
+    "holiday": ["holiday_name", "description"],
+    "loot_action": ["loot_action_name", "description"],
+    "testset": ["test_set_name", "description"],
+    "relationship": ["relationship_name", "description"],
+    "skill": ["skill_name", "description"],
+    "motive": ["motive_name", "decay_rate", "threshold"],
+}
+
+
 def wizard_ask(prompt: str, default: str = "") -> str:
     try:
         prompt_text = f"{PROMPT_GLYPH} {prompt}"
@@ -1455,6 +1487,13 @@ def validate_project(proj: Path, strict: bool = False) -> int:
             continue
         if not txt.lstrip().startswith("<?xml"):
             issues += 1
+            continue
+        stem = xml.name
+        for kind, tags in TUNING_TAG_RULES.items():
+            if stem.endswith(f"_{kind}.xml") or f"_{kind}." in stem or kind == stem:
+                missing = [t for t in tags if f'<T n="{t}">' not in txt and f'<U n="{t}">' not in txt]
+                if missing:
+                    issues += len(missing)
 
     pkg_candidates = list(proj.rglob("*.package")) + list(proj.rglob("*.package.template"))
     xml_or_script_count = len(list(proj.rglob("*.xml"))) + len(list(proj.rglob("*.py")))
@@ -1894,6 +1933,34 @@ def main(argv: list[str] | None = None) -> int:
         _write(changelog, content)
         print(_status_panel("changelog", _meta_block("verified", "Created", str(changelog)), command="changelog"))
         _advance_pipeline_if_artifact(proj, "CHANGELOG.md")
+        return 0
+
+    if command == "tune-ids":
+        if len(argv) < 2:
+            print_help(is_subcommand=True, command="tune-ids", error="Expected: tune-ids <path>")
+            return 2
+        proj = _existing_project(argv[1])
+        touched = []
+        for xml in sorted(proj.rglob("*.xml")):
+            txt = xml.read_text(encoding="utf-8", errors="ignore")
+            updated = txt
+            updated = updated.replace('<I d="0x00000000">', '<I d="' + _tuning_instance(xml.stem) + '">')
+            updated = updated.replace("<I d=\"0x00000000\">", "<I d=\"" + _tuning_instance(xml.stem) + "\">")
+            updated = updated.replace("<T n=\"career_icon\">0x00000000</T>", "<T n=\"career_icon\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
+            updated = updated.replace("<T n=\"display_name\">0x00000000</T>", "<T n=\"display_name\">" + _tuning_instance(xml.stem, "_display") + "</T>")
+            updated = updated.replace("<T n=\"description\">0x00000000</T>", "<T n=\"description\">" + _tuning_instance(xml.stem, "_desc") + "</T>")
+            updated = updated.replace("<T n=\"icon_resource\">0x00000000</T>", "<T n=\"icon_resource\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
+            updated = updated.replace("<U n=\"club_icon\">0x00000000</U>", "<U n=\"club_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
+            updated = updated.replace("<U n=\"holiday_icon\">0x00000000</U>", "<U n=\"holiday_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
+            updated = updated.replace("<U n=\"relationship_value\">0</U>", "<U n=\"relationship_value\">0</U>")
+            if updated != txt:
+                _write(xml, updated)
+                touched.append(str(xml.relative_to(proj)))
+        rows = _meta_block("verified", "Tuned IDs", f"{len(touched)} file(s)")
+        if touched:
+            rows += ["", "Updated:"] + [f"  - {item}" for item in touched[:20]]
+        print(_status_panel("tune-ids", rows, command="tune-ids"))
+        _advance_pipeline_if_artifact(proj, "tmp/tune_ids_report.txt")
         return 0
 
     if command == "wizard":
