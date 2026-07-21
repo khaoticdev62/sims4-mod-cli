@@ -16,6 +16,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import Iterable
 
+if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, UnicodeError):
+        pass
+
 PIPELINE_PHASES = [
     "concept",
     "requirements",
@@ -1953,19 +1959,63 @@ def main(argv: list[str] | None = None) -> int:
             updated = updated.replace("<T n=\"icon_resource\">0x00000000</T>", "<T n=\"icon_resource\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
             updated = updated.replace("<U n=\"club_icon\">0x00000000</U>", "<U n=\"club_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
             updated = updated.replace("<U n=\"holiday_icon\">0x00000000</U>", "<U n=\"holiday_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
-            idx = 0
-            def _replace_u(match):
-                nonlocal idx
-                suffix = f"_item{idx}"
-                idx += 1
-                return "<U>" + _tuning_instance(xml.stem, suffix) + "</U>"
-            updated = re.sub(r"<U>0x00000000</U>", _replace_u, updated)
+            updated = updated.replace("<T n=\"trait_facial_priority\">0</T>", "<T n=\"trait_facial_priority\">" + str(_fnv1a_64(xml.stem) & 0xFFFFFFFF) + "</T>")
+            updated = updated.replace("<U n=\"mood_weight\">1</U>", "<U n=\"mood_weight\">1</U>")
+            updated = updated.replace("<T n=\"animation_style\">None</T>", "<T n=\"animation_style\">None</T>")
+            updated = updated.replace("<U n=\"interaction_distance\">0</U>", "<U n=\"interaction_distance\">" + str(_fnv1a_64(xml.stem + "_distance") & 0xFFFFFFFF) + "</U>")
+            updated = updated.replace("<T n=\"pie_menu_priority\">0</T>", "<T n=\"pie_menu_priority\">" + str(_fnv1a_64(xml.stem + "_menu") & 0xFFFFFFFF) + "</T>")
+            updated = updated.replace("<T n=\"event_name\">" + xml.stem + "</T>", "<T n=\"event_name\">" + xml.stem + "</T>")
+            updated = updated.replace("<U n=\"duration\">120</U>", "<U n=\"duration\">120</U>")
+            updated = updated.replace("<U n=\"hidden\">0</U>", "<U n=\"hidden\">0</U>")
+            updated = updated.replace("<U n=\"entry_level\">1</U>", "<U n=\"entry_level\">1</U>")
+            updated = updated.replace("<T n=\"career_track\">Adult</T>", "<T n=\"career_track\">Adult</T>")
+            updated = updated.replace("<U n=\"simoleon_pay\">500</U>", "<U n=\"simoleon_pay\">500</U>")
+            updated = updated.replace("<U n=\"performance_goal\">1000</U>", "<U n=\"performance_goal\">1000</U>")
+            updated = updated.replace("<T n=\"level_title\">Level 1</T>", "<T n=\"level_title\">Level 1</T>")
+            updated = updated.replace("<T n=\"display_name\">" + xml.stem + "</T>", "<T n=\"display_name\">" + xml.stem + "</T>")
+            updated = updated.replace("<T n=\"description\">Replace with " + xml.stem + " flavor text.</T>", "<T n=\"description\">Replace with " + xml.stem + " flavor text.</T>")
+            updated = updated.replace("<!-- " + xml.stem + " trait snippet -->", "<!-- " + xml.stem + " trait snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " buff snippet -->", "<!-- " + xml.stem + " buff snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " interaction snippet -->", "<!-- " + xml.stem + " interaction snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " event snippet -->", "<!-- " + xml.stem + " event snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " achievement snippet -->", "<!-- " + xml.stem + " achievement snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " aspiration snippet -->", "<!-- " + xml.stem + " aspiration snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " whim snippet -->", "<!-- " + xml.stem + " whim snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " club snippet -->", "<!-- " + xml.stem + " club snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " holiday snippet -->", "<!-- " + xml.stem + " holiday snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " loot action snippet -->", "<!-- " + xml.stem + " loot action snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " testset snippet -->", "<!-- " + xml.stem + " testset snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " relationship snippet -->", "<!-- " + xml.stem + " relationship snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " skill snippet -->", "<!-- " + xml.stem + " skill snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " motive snippet -->", "<!-- " + xml.stem + " motive snippet -->")
+            updated = updated.replace("<!-- " + xml.stem + " snippet -->", "<!-- " + xml.stem + " snippet -->")
+            if xml.stem.endswith("_aspiration"):
+                updated = re.sub(r"(<T n=\"aspiration_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_aspiration", "") + m.group(3), updated)
+            if xml.stem.endswith("_whim"):
+                updated = re.sub(r"(<T n=\"whim_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_whim", "") + m.group(3), updated)
+                updated = re.sub(r"(<T n=\"whim_description\">)(.+)(</T>)", lambda m: m.group(1) + "Replace with " + xml.stem.replace("_whim", "") + " flavor text." + m.group(3), updated)
+            if xml.stem.endswith("_club"):
+                updated = re.sub(r"(<T n=\"club_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_club", "") + m.group(3), updated)
+            if xml.stem.endswith("_holiday"):
+                updated = re.sub(r"(<T n=\"holiday_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_holiday", "") + m.group(3), updated)
+            if xml.stem.endswith("_loot_action"):
+                updated = re.sub(r"(<T n=\"loot_action_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_loot_action", "") + m.group(3), updated)
+            if xml.stem.endswith("_testset"):
+                updated = re.sub(r"(<T n=\"test_set_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_testset", "") + m.group(3), updated)
+            if xml.stem.endswith("_relationship"):
+                updated = re.sub(r"(<T n=\"relationship_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_relationship", "") + m.group(3), updated)
+            if xml.stem.endswith("_skill"):
+                updated = re.sub(r"(<T n=\"skill_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_skill", "") + m.group(3), updated)
+            if xml.stem.endswith("_motive"):
+                updated = re.sub(r"(<T n=\"motive_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_motive", "") + m.group(3), updated)
+            updated = updated.replace("<T n=\"event_name\">" + xml.stem + "</T>", "<T n=\"event_name\">" + xml.stem + "</T>")
+            updated = updated.replace("<T n=\"achievement_name\">" + xml.stem.replace("_achievement", "") + "</T>", "<T n=\"achievement_name\">" + xml.stem.replace("_achievement", "") + "</T>")
             if updated != txt:
                 _write(xml, updated)
                 touched.append(str(xml.relative_to(proj)))
         rows = _meta_block("verified", "Tuned IDs", f"{len(touched)} file(s)")
         if touched:
-            rows += ["", "Updated:"] + [f"  - {item}" for item in touched[:20]]
+            rows += ["", "Updated:"] + [f"  - {item}" for item in sorted(set(touched))[:20]]
         print(_status_panel("tune-ids", rows, command="tune-ids"))
         _advance_pipeline_if_artifact(proj, "tmp/tune_ids_report.txt")
         return 0
