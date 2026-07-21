@@ -207,8 +207,12 @@ def unlock_current_phase(proj: Path) -> str:
     lock_phase(state, cur)
     save_pipeline_state(proj, state)
     nxt = current_phase(state)
-    rows = _meta_block("verified", "Unlocked", f"{PIPELINE_META[cur]['name']} -> {PIPELINE_META[nxt]['name']}")
-    rows += [f"{C_BOLD_WHITE}Progress:{C_RESET} {phase_progress(state)[2]}/{len(PIPELINE_PHASES)}"]
+    if nxt == cur and is_phase_locked(state, cur):
+        msg = "Pipeline complete"
+    else:
+        msg = f"{PIPELINE_META[cur]['name']} -> {PIPELINE_META[nxt]['name']}"
+    rows = _meta_block("verified", "Unlocked", msg)
+    rows += [f"{C_BOLD_WHITE}Progress:{C_RESET} {phase_progress(state)[1]}/{len(PIPELINE_PHASES)}"]
     return _status_panel("pipeline-unlock", rows, command="pipeline-unlock")
 
 

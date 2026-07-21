@@ -1,6 +1,6 @@
 # Sims 4 Mod Types & Autoscripting Guide
 
-This CLI supports two main authoring modes:
+This CLI supports three main authoring modes:
 - `new` — add one artifact to an existing project
 - `generate` — autoscript a full scaffold, with optional `--param key=value` tuning
 - `wizard` — guided creation with brain advice, dependencies, and next steps
@@ -16,6 +16,15 @@ Supported mod types:
 - interaction
 - event
 - achievement
+- aspiration
+- whim
+- club
+- holiday
+- loot_action
+- testset
+- relationship
+- skill
+- motive
 
 ## Common commands
 - `python s4mod_cli.py --help`
@@ -27,6 +36,9 @@ Supported mod types:
 - `python s4mod_cli.py changelog [path]`
 - `python s4mod_cli.py validate [path]`
 - `python s4mod_cli.py build [path]`
+- `python s4mod_cli.py package [path]`
+- `python s4mod_cli.py pipeline [path]`
+- `python s4mod_cli.py pipeline tune <phase> [path]`
 - `python s4mod_cli.py doctor`
 - `python s4mod_cli.py version`
 
@@ -36,6 +48,7 @@ Use `--param` to inject labels, descriptions, commands, or tuning notes:
 - `description` → body/flavor text
 - `command` → ts4script command name
 - `tuning` → multiline tuning notes for XML snippets
+- `note.<key>` → save pipeline notes into `.s4modstate`
 
 ## Wizard workflow
 - `wizard career NightShift` prompts for label, description, pay, level_title
@@ -50,6 +63,7 @@ Use `--param` to inject labels, descriptions, commands, or tuning notes:
 ## Packaging
 - Use `.package` or `.package.template` files under `src/package` for CC/packaged mods.
 - `build` zips the project for Mods install.
+- `package` creates a release zip excluding dist/tmp/.git.
 - `install` copies to your detected Sims 4 `Mods` folder.
 
 Examples:
@@ -57,3 +71,4 @@ Examples:
 - `python s4mod_cli.py generate trait RoadDog --param description="started on the road"`
 - `python s4mod_cli.py validate .`
 - `python s4mod_cli.py build .`
+- `python s4mod_cli.py pipeline tune tuning .`
