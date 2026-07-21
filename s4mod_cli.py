@@ -15,6 +15,220 @@ from pathlib import Path
 from datetime import datetime
 from typing import Iterable
 
+PIPELINE_PHASES = [
+    "concept",
+    "requirements",
+    "proof",
+    "tuning",
+    "implementation",
+    "validation",
+    "local_test",
+    "packaging",
+    "distribution",
+]
+
+PIPELINE_META = {
+    "concept": {
+        "name": "Concept",
+        "hint": "Define the mod idea, player impact, and success criteria.",
+        "next": "Write 3-6 bullet requirements.",
+        "artifact": "mod_notes.txt",
+    },
+    "requirements": {
+        "name": "Requirements",
+        "hint": "Lock the feature list, inputs, outputs, and edge cases.",
+        "next": "Create a tiny proof/placeholder scaffold.",
+        "artifact": "docs/requirements.md",
+    },
+    "proof": {
+        "name": "Proof",
+        "hint": "Prove the smallest possible behavior end-to-end.",
+        "next": "Tune values and replace placeholders.",
+        "artifact": "tmp/proof_checklist.txt",
+    },
+    "tuning": {
+        "name": "Tuning",
+        "hint": "Adjust loot thresholds, decay rates, pay curves, and text.",
+        "next": "Implement the locked behavior in XML/script.",
+        "artifact": "src/**/README.txt",
+    },
+    "implementation": {
+        "name": "Implementation",
+        "hint": "Replace placeholders with real behavior and code paths.",
+        "next": "Run validation and fix issues.",
+        "artifact": "src/**",
+    },
+    "validation": {
+        "name": "Validation",
+        "hint": "Run s4mod_cli validate and fix XML/schema/text issues.",
+        "next": "Load in-game and test locally.",
+        "artifact": "dist/*.zip",
+    },
+    "local_test": {
+        "name": "Local Test",
+        "hint": "Playtest locally, capture receipts/stress/fatigue behavior.",
+        "next": "Package release and log changelog.",
+        "artifact": "tmp/playtest_notes.txt",
+    },
+    "packaging": {
+        "name": "Packaging",
+        "hint": "Create release zip and verify contents/install path.",
+        "next": "Publish or deliver to testers.",
+        "artifact": "dist/*-release-*.zip",
+    },
+    "distribution": {
+        "name": "Distribution",
+        "hint": "Deliver release notes, install path, and support notes.",
+        "next": "Pipeline complete.",
+        "artifact": "CHANGELOG.md",
+    },
+}
+
+
+def pipeline_state_path(proj: Path) -> Path:
+    return proj / ".s4modstate"
+
+
+def load_pipeline_state(proj: Path) -> dict:
+    path = pipeline_state_path(proj)
+    state = {"phase_index": 0, "locked": [], "notes": {}}
+    if not path.exists():
+        return state
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("phase_index="):
+            try:
+                state["phase_index"] = int(line.split("=", 1)[1])
+            except ValueError:
+                pass
+        elif line.startswith("locked="):
+            state["locked"] = [p.strip() for p in line.split("=", 1)[1].split(",") if p.strip()]
+        elif line.startswith("note."):
+            k, v = line.split("=", 1)
+            state["notes"][k.replace("note.", "", 1)] = v
+    return state
+
+
+def save_pipeline_state(proj: Path, state: dict) -> None:
+    path = pipeline_state_path(proj)
+    lines = [
+        "# s4mod state: editable only via pipeline commands",
+        f"phase_index={state.get('phase_index', 0)}",
+        f"locked={','.join(state.get('locked', []))}",
+    ]
+    for k, v in state.get("notes", {}).items():
+        lines.append(f"note.{k}={v}")
+    _write(path, "\n".join(lines) + "\n")
+
+
+def current_phase(state: dict) -> str:
+    idx = max(0, min(int(state.get("phase_index", 0)), len(PIPELINE_PHASES) - 1))
+    return PIPELINE_PHASES[idx]
+
+
+def is_phase_locked(state: dict, phase: str) -> bool:
+    return phase in [p for p in state.get("locked", []) if p in PIPELINE_PHASES]
+
+
+def lock_phase(state: dict, phase: str) -> None:
+    if phase not in state.get("locked", []):
+        state.setdefault("locked", []).append(phase)
+    try:
+        idx = PIPELINE_PHASES.index(phase)
+    except ValueError:
+        return
+    state["phase_index"] = min(idx + 1, len(PIPELINE_PHASES) - 1)
+
+
+def phase_progress(state: dict) -> tuple[str, int, int, int]:
+    total = len(PIPELINE_PHASES)
+    current = PIPELINE_PHASES[max(0, min(int(state.get("phase_index", 0)), total - 1))]
+    locked_count = len([p for p in PIPELINE_PHASES if p in state.get("locked", [])])
+    completed = locked_count
+    pct = int((completed / total) * 100) if total else 0
+    return current, completed, total, pct
+
+
+def next_actions(state: dict) -> list[str]:
+    cur = current_phase(state)
+    meta = PIPELINE_META.get(cur, {})
+    actions = [f"Complete current phase: {meta.get('name', cur)}", meta.get("next", "")]
+    if meta.get("artifact"):
+        actions.append(f"Expected artifact: {meta['artifact']}")
+    return [a for a in actions if a]
+
+
+def print_pipeline_status(proj: Path) -> str:
+    state = load_pipeline_state(proj)
+    cur, done, total, pct = phase_progress(state)
+    rows = [f"{'Phase':20} {'Status':10} {'Hint'}"]
+    rows.append("─" * 60)
+    for p in PIPELINE_PHASES:
+        locked = is_phase_locked(state, p)
+        active = p == cur and not locked
+        marker = "DONE" if locked else ("ACTIVE" if active else "WAIT")
+        color = C_GREEN if locked else C_YELLOW if active else C_RESET
+        label = PIPELINE_META[p]["name"]
+        hint = PIPELINE_META[p]["hint"]
+        rows.append(f"{C_BOLD_WHITE}{label:20}{C_RESET} {color}{marker:10}{C_RESET} {hint}")
+    rows += [
+        "",
+        f"{C_BOLD_WHITE}Progress:{C_RESET} {done}/{total} ({pct}%)",
+        f"{C_BOLD_WHITE}Next:{C_RESET}",
+    ] + [f"  - {a}" for a in next_actions(state)]
+    return _status_panel("pipeline", rows, command="pipeline")
+
+
+def print_pipeline_next(proj: Path) -> str:
+    state = load_pipeline_state(proj)
+    cur = current_phase(state)
+    actions = next_actions(state)
+    rows = [f"{C_BOLD_WHITE}Current Phase:{C_RESET} {PIPELINE_META[cur]['name']}"]
+    rows += [
+        "",
+        f"{C_BOLD_WHITE}Next Actions:{C_RESET}",
+    ] + [f"  - {a}" for a in actions]
+    rows += [
+        "",
+        f"{C_BOLD_WHITE}Unlock:{C_RESET} pipeline unlock .",
+        f"{C_BOLD_WHITE}Reset:{C_RESET} pipeline reset .",
+    ]
+    return _status_panel("pipeline-next", rows, command="pipeline-next")
+
+
+def unlock_current_phase(proj: Path) -> str:
+    state = load_pipeline_state(proj)
+    cur = current_phase(state)
+    if is_phase_locked(state, cur):
+        out = _meta_block("blocked", "Blocked", f"{cur} already locked")[0]
+        return _status_panel("pipeline-unlock", [out], command="pipeline-unlock")
+    lock_phase(state, cur)
+    save_pipeline_state(proj, state)
+    nxt = current_phase(state)
+    rows = _meta_block("verified", "Unlocked", f"{PIPELINE_META[cur]['name']} -> {PIPELINE_META[nxt]['name']}")
+    rows += [f"{C_BOLD_WHITE}Progress:{C_RESET} {phase_progress(state)[2]}/{len(PIPELINE_PHASES)}"]
+    return _status_panel("pipeline-unlock", rows, command="pipeline-unlock")
+
+
+def reset_pipeline(proj: Path) -> str:
+    state = {"phase_index": 0, "locked": [], "notes": {}}
+    save_pipeline_state(proj, state)
+    rows = _meta_block("ok", "Reset", "Pipeline reset to concept phase")
+    return _status_panel("pipeline-reset", rows, command="pipeline-reset")
+
+
+def _advance_pipeline_if_artifact(proj: Path, artifact_rel: str) -> None:
+    state = load_pipeline_state(proj)
+    cur = current_phase(state)
+    if is_phase_locked(state, cur):
+        return
+    if (proj / artifact_rel).exists():
+        lock_phase(state, cur)
+        save_pipeline_state(proj, state)
+
+
 ROOT = Path(__file__).resolve().parent
 
 
@@ -1537,6 +1751,30 @@ def main(argv: list[str] | None = None) -> int:
         print(_status_panel("version", _meta_block("ok", "Version", "s4mod_cli v0.1.0-dev"), command="version"))
         return 0
 
+    if command == "pipeline":
+        path = argv[1] if len(argv) > 1 else "."
+        proj = _existing_project(path)
+        print(print_pipeline_status(proj))
+        return 0
+
+    if command == "pipeline-next":
+        path = argv[1] if len(argv) > 1 else "."
+        proj = _existing_project(path)
+        print(print_pipeline_next(proj))
+        return 0
+
+    if command == "pipeline-unlock":
+        path = argv[1] if len(argv) > 1 else "."
+        proj = _existing_project(path)
+        print(unlock_current_phase(proj))
+        return 0
+
+    if command == "pipeline-reset":
+        path = argv[1] if len(argv) > 1 else "."
+        proj = _existing_project(path)
+        print(reset_pipeline(proj))
+        return 0
+
     if command == "game-python":
         ensure_game_python()
         return 0
@@ -1582,6 +1820,11 @@ def main(argv: list[str] | None = None) -> int:
         preset = wizard_presets(mod_type)
         advice = compatibility_advice(mod_type)
         deps = dependency_notes(mod_type)
+        note_kv = {k.replace("note.", "", 1): v for k, v in params.items() if k.startswith("note.")}
+        if note_kv:
+            state = load_pipeline_state(proj)
+            state.setdefault("notes", {}).update(note_kv)
+            save_pipeline_state(proj, state)
         panel = [
             _meta_block("verified", "Generated", f"{mod_type}: {name}")[0],
             f"Path: {d}",
@@ -1594,6 +1837,11 @@ def main(argv: list[str] | None = None) -> int:
             "",
             f"{C_BOLD_WHITE}Next Steps:{C_RESET}",
         ] + [f"  - {item}" for item in preset.get("next_steps", [])]
+        if note_kv:
+            panel += [
+                "",
+                f"{C_BOLD_WHITE}Pipeline Notes Saved:{C_RESET}",
+            ] + [f"  {k}: {v}" for k, v in note_kv.items()]
         print(_status_panel("generate", panel, command="generate"))
         return 0
 
