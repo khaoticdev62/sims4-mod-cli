@@ -1959,6 +1959,13 @@ def main(argv: list[str] | None = None) -> int:
             updated = updated.replace("<T n=\"icon_resource\">0x00000000</T>", "<T n=\"icon_resource\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
             updated = updated.replace("<U n=\"club_icon\">0x00000000</U>", "<U n=\"club_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
             updated = updated.replace("<U n=\"holiday_icon\">0x00000000</U>", "<U n=\"holiday_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
+            idx = 0
+            def _replace_u(match):
+                nonlocal idx
+                suffix = f"_item{idx}"
+                idx += 1
+                return "<U>" + _tuning_instance(xml.stem, suffix) + "</U>"
+            updated = re.sub(r"<U>0x00000000</U>", _replace_u, updated)
             updated = updated.replace("<T n=\"trait_facial_priority\">0</T>", "<T n=\"trait_facial_priority\">" + str(_fnv1a_64(xml.stem) & 0xFFFFFFFF) + "</T>")
             updated = updated.replace("<U n=\"mood_weight\">1</U>", "<U n=\"mood_weight\">1</U>")
             updated = updated.replace("<T n=\"animation_style\">None</T>", "<T n=\"animation_style\">None</T>")
