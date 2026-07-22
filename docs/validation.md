@@ -23,7 +23,7 @@ The package check is skipped when `src/package/` exists and the project has XML 
 | Missing config | `s4modconfig.yaml` absent | `s4chemist_cli init <name>` |
 | Template mod name | config contains `ReplaceMe` | set a real `mod_name:` |
 | Template creator | config contains `YourName` | set a real `creator:` |
-| Placeholder tuning id | XML contains `0x00000000` | run `s4chemist_cli tune-ids <proj>` to assign real ids |
+| Placeholder tuning id | XML contains `0x00000000` | run `s4chemist_cli tune-ids <project>` to assign real ids |
 | Placeholder flavor text | XML contains `Replace with ...` | write real display/description text |
 
 ## Tag matching and duplicate tagging rules

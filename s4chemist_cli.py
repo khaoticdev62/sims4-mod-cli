@@ -11,6 +11,7 @@ import re
 import shlex
 import shutil
 import sys
+import textwrap
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,7 +34,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 PIPELINE_PHASES = [
     "concept",
@@ -211,7 +212,7 @@ def print_pipeline_status(proj: Path) -> str:
         "",
         f"[head]Progress:[/] {done}/{total} ({pct}%) [ok]{_progress_bar(pct)}[/]",
         "[head]Next:[/]",
-    ] + [f"  - {_esc(a)}" for a in next_actions(state)]
+    ] + _bullets(_esc(a) for a in next_actions(state))
     return _status_panel("pipeline", rows, command="pipeline")
 
 
@@ -353,6 +354,23 @@ def _prompt() -> str:
 def _esc(text: object) -> str:
     """Escape user-derived content so it cannot corrupt Rich markup."""
     return _escape_markup(str(text))
+
+
+def _bullets(items: Iterable[str], *, indent: str = "  - ") -> list[str]:
+    """Bullet lines with hanging indent: wrapped continuations align under the
+    text start instead of spilling back to the panel edge."""
+    width = max(40, _console.width - 6)
+    out = []
+    for item in items:
+        wrapped = textwrap.wrap(
+            indent + item,
+            width=width,
+            subsequent_indent=" " * len(indent),
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [indent.rstrip()]
+        out.extend(wrapped)
+    return out
 
 
 def _fnv1a_64(text: str) -> int:
@@ -1627,7 +1645,7 @@ def _validate_project_issues(proj: Path, strict: bool = False) -> list[str]:
                     issues.append(f"{rel}: missing '{tag}' tag required for {kind} tuning")
         if strict:
             if "0x00000000" in txt:
-                issues.append(f"{rel}: placeholder tuning id 0x00000000 (run 's4chemist_cli tune-ids {proj}' to assign real ids)")
+                issues.append(f"{rel}: placeholder tuning id 0x00000000 (run 's4chemist_cli tune-ids <project>' to assign real ids)")
             if "Replace with" in txt:
                 issues.append(f"{rel}: placeholder flavor text 'Replace with ...' (write real display text)")
 
@@ -1809,8 +1827,13 @@ def print_help(*, is_subcommand=False, command="", error="") -> None:
         panel.extend(_section("FOOTER", _help_footer()))
     else:
         panel.extend(_section("COMMANDS", [_commands_table()]))
-        kinds = " | ".join(MOD_FACTORIES)
-        panel.extend(_section("KINDS", [f"  {kinds}"]))
+        kind_list = list(MOD_FACTORIES)
+        half = (len(kind_list) + 1) // 2
+        kind_rows = [
+            f"  {kind_list[i]:<15}{kind_list[i + half] if i + half < len(kind_list) else ''}"
+            for i in range(half)
+        ]
+        panel.extend(_section("KINDS", kind_rows))
         panel.extend(_section("STATUS KEY", ["  [verified]\\[VERIFIED][/]   = exercised end-to-end", "  [local]\\[LOCAL][/]     = needs environment-specific value", "  [blocked]\\[BLOCKED][/]   = missing dependency / environment"]))
         panel.extend(_section("FOOTER", _help_footer()))
 
@@ -1883,7 +1906,7 @@ def _cmd_validate(argv: list[str]) -> int:
     state = "ok" if issues == 0 else "fail"
     rows = _meta_block(state, "Validation", f"{issues} issue{'s' if issues != 1 else ''}")
     if found:
-        rows += ["", "[head]Issues:[/]"] + [f"  - {_esc(item)}" for item in found[:15]]
+        rows += ["", "[head]Issues:[/]"] + _bullets(_esc(item) for item in found[:15])
         if issues > 15:
             rows.append(f"  ... and {issues - 15} more")
         if not strict:
@@ -2057,10 +2080,10 @@ def _cmd_generate(argv: list[str]) -> int:
         f"  {advice}",
         "",
         "[head]Dependencies:[/]",
-    ] + [f"  - {_esc(item)}" for item in deps] + [
+    ] + _bullets(_esc(item) for item in deps) + [
         "",
         "[head]Next Steps:[/]",
-    ] + [f"  - {_esc(item)}" for item in preset.get("next_steps", [])]
+    ] + _bullets(_esc(item) for item in preset.get("next_steps", []))
     _advance_pipeline_if_artifact(proj, f"src/{mod_type}")
     _advance_pipeline_if_artifact(proj, "src/xml_snippets")
     _advance_pipeline_if_artifact(proj, "src/ts4script")
@@ -2178,7 +2201,7 @@ def _cmd_tune_ids(argv: list[str]) -> int:
             touched.append(str((loc_dir / f"stbl_{xml.stem}.txt").relative_to(proj)))
     rows = _meta_block("verified", "Tuned IDs", f"{len(touched)} file(s)")
     if touched:
-        rows += ["", "[head]Updated:[/]"] + [f"  - {_esc(item)}" for item in sorted(set(touched))[:20]]
+        rows += ["", "[head]Updated:[/]"] + _bullets(_esc(item) for item in sorted(set(touched))[:20])
     print(_status_panel("tune-ids", rows, command="tune-ids"))
     _advance_pipeline_if_artifact(proj, "tmp/tune_ids_report.txt")
     return 0
@@ -2267,10 +2290,10 @@ def _cmd_wizard(argv: list[str]) -> int:
         f"  {advice}",
         "",
         "[head]Dependencies:[/]",
-    ] + [f"  - {_esc(item)}" for item in deps] + [
+    ] + _bullets(_esc(item) for item in deps) + [
         "",
         "[head]Next Steps:[/]",
-    ] + [f"  - {_esc(item)}" for item in preset.get("next_steps", [])]
+    ] + _bullets(_esc(item) for item in preset.get("next_steps", []))
     print(_status_panel("wizard", panel, command="wizard"))
     _advance_pipeline_if_artifact(proj, f"src/{mod_type}")
     _advance_pipeline_if_artifact(proj, "CHANGELOG.md")
@@ -2280,20 +2303,24 @@ def _cmd_wizard(argv: list[str]) -> int:
 # ── Textual TUI (full dashboard; launched via `tui`) ───────────────────────
 
 _TUI_CSS = """
-#sidebar { width: 30; padding: 1; border-right: solid $primary; }
-#sidebar Label { margin-top: 1; }
+#sidebar { width: 30; padding: 1; border-right: tall $boost; }
+#sidebar Label { margin-top: 1; color: $text-muted; text-style: bold; }
 #sidebar Button { width: 100%; margin-top: 1; }
-DataTable { height: auto; max-height: 70%; }
-#phase-detail { padding: 0 1; border-top: solid $primary; height: auto; }
-#preview { border-left: solid $primary; }
-#status-bar { padding: 0 1; background: $boost; }
+#status-bar { padding: 0 1; background: $boost; border-bottom: tall $boost; }
+DataTable { height: auto; max-height: 70%; border: round $boost; }
+DataTable > .datatable--header { text-style: bold; }
+#phase-detail { padding: 0 1; border-top: tall $boost; height: auto; }
+#preview { border-left: tall $boost; }
+#preview-title { padding: 0 1; color: $text-muted; text-style: bold; }
 RichLog { height: 1fr; }
 Horizontal { height: 1fr; }
+Input:focus { border: round $secondary; }
+Select:focus { border: round $secondary; }
 WizardScreen { align: center middle; }
-#wizard-form { width: 64; height: auto; max-height: 90%; padding: 1 2; border: solid $primary; background: $surface; }
-#wizard-form Label { margin-top: 1; }
+#wizard-form { width: 64; height: auto; max-height: 90%; padding: 1 2; border: round $primary; background: $surface; }
+#wizard-form Label { margin-top: 1; color: $text-muted; text-style: bold; }
 #wizard-form Button { margin-top: 1; margin-right: 1; }
-#w_error { color: $error; }
+#w_error { color: $error; text-style: bold; }
 """
 
 _PREVIEW_LEXERS = {
@@ -2454,17 +2481,17 @@ def _make_tui_app(project: str = "."):
                     yield Label("Project")
                     yield Input(value=project, placeholder="project path", id="project")
                     yield Label("Commands")
-                    yield Button("Validate", id="validate")
-                    yield Button("Build", id="build")
-                    yield Button("Package", id="package")
+                    yield Button("Validate", id="validate", variant="primary")
+                    yield Button("Build", id="build", variant="primary")
+                    yield Button("Package", id="package", variant="primary")
                     yield Button("Changelog", id="changelog")
                     yield Button("Tune IDs", id="tune-ids")
                     yield Button("Doctor", id="doctor")
-                    yield Button("Wizard", id="open-wizard")
+                    yield Button("Wizard", id="open-wizard", variant="warning")
                     yield Label("Generate")
                     yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="mod_type")
                     yield Input(placeholder="module/object name", id="gen_name")
-                    yield Button("Generate", id="generate")
+                    yield Button("Generate", id="generate", variant="success")
                 with Vertical():
                     yield Static("", id="status-bar")
                     with TabbedContent():
@@ -2474,7 +2501,9 @@ def _make_tui_app(project: str = "."):
                         with TabPane("Files", id="tab-files"):
                             with Horizontal():
                                 yield Vertical(id="files-container")
-                                yield RichLog(id="preview", markup=True)
+                                with Vertical():
+                                    yield Static("select a file to preview", id="preview-title")
+                                    yield RichLog(id="preview", markup=True)
                         with TabPane("Log", id="tab-log"):
                             yield RichLog(id="log", markup=True)
             yield Footer()
@@ -2482,6 +2511,7 @@ def _make_tui_app(project: str = "."):
         def on_mount(self) -> None:
             self.history = []  # per-instance log mirror (class attr is just the default)
             self.query_one("#pipeline", DataTable).add_columns("Phase", "Status", "Hint")
+            self.query_one("#log", RichLog).write(f"[{HERMES['muted']}]Command output appears here.[/]")
             self.refresh_pipeline()
 
         def action_refresh(self) -> None:
@@ -2565,6 +2595,7 @@ def _make_tui_app(project: str = "."):
             preview = self.query_one("#preview", RichLog)
             preview.clear()
             path = Path(event.path)
+            self.query_one("#preview-title", Static).update(f"[bold]{path.name}[/]")
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError as exc:

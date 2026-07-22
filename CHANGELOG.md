@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.0 — 2026-07-22
+
+Deep UI refinement, round 2: typography and layout craftsmanship.
+
+### Changed
+- Hanging-indent wrapping for all panel bullets (validate issues, tune-ids lists, advice/next
+  steps): wrapped continuations align under the text instead of spilling to the panel edge
+- `validate` placeholder hint no longer prints the absolute project path
+  (`tune-ids <project>` instead)
+- Help KINDS list is now two aligned columns instead of a wrapped wall of text
+- TUI identity: rounded/muted borders, focus rings on inputs, button variants (primary/
+  success/warning), styled DataTable header, preview filename header + empty states for the
+  preview and log panes, muted sidebar section labels
+
 ## 0.7.0 — 2026-07-22
 
 Deep UI refinement: one Hermes design system across all three interfaces.
