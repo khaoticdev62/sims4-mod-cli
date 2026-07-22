@@ -34,7 +34,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.9.4"
+__version__ = "0.9.5"
 
 PIPELINE_PHASES = [
     "concept",
@@ -2352,6 +2352,7 @@ RichLog { height: 1fr; }
 Horizontal { height: 1fr; }
 Input:focus { border: round $secondary; }
 Select:focus { border: round $secondary; }
+SelectCurrent { height: auto; }  /* textual 8: Horizontal base leaks height:1fr into SelectCurrent */
 #create-form { padding: 1 2; }
 #create-form Label { margin-top: 1; color: $text-muted; text-style: bold; }
 #w_params_scroll { height: 1fr; min-height: 5; border: round $boost; padding: 0 1; }

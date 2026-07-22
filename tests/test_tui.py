@@ -165,6 +165,28 @@ async def _wait_for(predicate, timeout=5.0):
     return predicate()
 
 
+def test_tui_selects_stay_collapsed(tmp_project):
+    """Regression: textual 8's Horizontal base leaks height:1fr into SelectCurrent,
+    stretching Selects to fill the tab and hiding the form. Both Selects must stay
+    collapsed (3 rows) and the overlay must open."""
+    cli = _load_cli()
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(100, 24)):
+            from textual.widgets import Select, TabbedContent
+            from textual.widgets._select import SelectOverlay
+            app.query_one(TabbedContent).active = "tab-create"
+            assert await _wait_for(lambda: app.query_one("#w_type", Select).region.height > 0)
+            assert app.query_one("#w_type", Select).region.height == 3
+            assert app.query_one("#mod_type", Select).region.height == 3
+            select = app.query_one("#w_type", Select)
+            select.expanded = True
+            assert await _wait_for(lambda: select.query_one(SelectOverlay).display is True)
+
+    _run(go())
+
+
 def test_tui_create_tab_type_switch_rebuilds_params(tmp_project):
     """Switching mod type must rebuild params without DuplicateIds (remove awaited)."""
     cli = _load_cli()

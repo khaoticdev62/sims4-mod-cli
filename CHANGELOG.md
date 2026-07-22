@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.5 — 2026-07-22
+
+### Fixed
+- Clicking the mod-type dropdown "did nothing": textual 8's `Horizontal` base leaks
+  `height: 1fr` into `SelectCurrent`, stretching every Select to fill its container —
+  devouring the Create tab (params/button pushed out) and leaving the clickable control
+  unreachable. Pinned with an explicit `SelectCurrent { height: auto; }` rule; both Selects
+  now stay collapsed at 3 rows and the overlay opens correctly. Regression test included.
+
 ## 0.9.4 — 2026-07-22
 
 ### Changed
