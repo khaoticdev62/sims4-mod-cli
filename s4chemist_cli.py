@@ -33,7 +33,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 PIPELINE_PHASES = [
     "concept",
@@ -1944,7 +1944,7 @@ def _cmd_help(argv: list[str]) -> int:
 def _cmd_pipeline(argv: list[str]) -> int:
     if len(argv) > 1 and argv[1] == "tune":
         phase = argv[2] if len(argv) > 2 else None
-        path = _project_path_from_argv(argv[3:] or argv[2:], default=".")
+        path = _project_path_from_argv(argv[2:], default=".")
         if phase not in PIPELINE_PHASES:
             print_help(is_subcommand=True, command="pipeline", error="Expected: pipeline tune <phase> [path]")
             return 2

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1 — 2026-07-22
+
+Full feature audit (67 end-to-end checks across all commands, UI modes, and artifacts).
+
+### Fixed
+- `pipeline tune <phase> <path>` ignored the given path and always used the current directory
+  (argv slicing skipped the path); regression test added
+- Flaky TUI wizard-modal tests now wait for async mount instead of racing fixed pauses
+
 ## 0.6.0 — 2026-07-22
 
 TUI deepening.

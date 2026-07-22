@@ -121,6 +121,18 @@ def test_tui_palette_provider_returns_hits(tmp_project):
     _run(go())
 
 
+async def _wait_for(predicate, timeout=5.0):
+    """Poll until predicate() is true; returns False on timeout."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(0.05)
+    return predicate()
+
+
 def test_tui_wizard_modal_creates_artifact(tmp_project):
     cli = _load_cli()
     import os
@@ -133,9 +145,9 @@ def test_tui_wizard_modal_creates_artifact(tmp_project):
             async with app.run_test(size=(120, 40)) as pilot:
                 from textual.widgets import Button, Input
                 app.query_one("#open-wizard", Button).press()
-                await pilot.pause()
+                assert await _wait_for(lambda: type(app.screen_stack[-1]).__name__ == "WizardScreen")
                 screen = app.screen_stack[-1]
-                assert type(screen).__name__ == "WizardScreen"
+                assert await _wait_for(lambda: bool(screen.query("#w_name")))
                 screen.query_one("#w_name", Input).value = "ModalTrait"
                 screen.query_one("#w_create", Button).press()
                 await pilot.pause()
@@ -155,11 +167,11 @@ def test_tui_wizard_modal_requires_name(tmp_project):
         async with app.run_test(size=(120, 40)) as pilot:
             from textual.widgets import Button, Label
             app.query_one("#open-wizard", Button).press()
-            await pilot.pause()
+            assert await _wait_for(lambda: type(app.screen_stack[-1]).__name__ == "WizardScreen")
             screen = app.screen_stack[-1]
+            assert await _wait_for(lambda: bool(screen.query("#w_create")))
             screen.query_one("#w_create", Button).press()
-            await pilot.pause()
-            assert "name is required" in str(screen.query_one("#w_error", Label).content)
+            assert await _wait_for(lambda: "name is required" in str(screen.query_one("#w_error", Label).content))
 
     _run(go())
 

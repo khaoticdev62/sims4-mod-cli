@@ -55,6 +55,12 @@ def test_pipeline_status_renders(tmp_project, repo_root):
     assert "pipeline" in stdout.lower() or "Phase" in stdout
 
 
+def test_pipeline_tune_uses_given_path(tmp_project, repo_root):
+    stdout, _, rc = cli_runner(["pipeline", "tune", "concept", str(tmp_project)], repo_root)
+    assert rc == 0
+    assert "Tune: Concept" in stdout
+
+
 ALL_KINDS = [
     "xml_snippet", "ts4script", "package", "career", "trait", "buff", "interaction",
     "event", "achievement", "aspiration", "whim", "club", "holiday", "loot_action",
