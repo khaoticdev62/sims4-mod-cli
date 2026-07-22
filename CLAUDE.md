@@ -111,8 +111,11 @@ The UI is built on `rich` (panels/tables) with `questionary`/`prompt_toolkit` fo
 `tui` dashboard (tabbed: pipeline table + phase detail, lazy file tree with syntax
 preview, wizard modal form, command palette via Ctrl+P, log pane). All commands render through shared
 helpers — `_status_panel` (auto-sized closed panel; body items may be markup strings or Rich
-renderables like `Table`), `_meta_block`, `_kv_block`, `_section` — styled by the `THEME`
-tags (`ok`/`fail`/`verified`/`local`/`blocked`/`accent`/`head`/`hint`/`glyph`). Rules:
+renderables like `Table`), `_meta_block`, `_kv_block`, `_section` — styled by the shared `HERMES`
+palette tokens feeding three surfaces: the rich `THEME` tags
+(`ok`/`fail`/`verified`/`local`/`blocked`/`accent`/`head`/`hint`/`glyph`/`muted`), a registered
+Textual theme (`hermes`), and the questionary menu style (`_qstyle()`). Footer hints only render
+on help/error panels (`hints=True`). Rules:
 never inline raw ANSI (`\033[...]`); always escape user-derived strings with `_esc()` so they
 can't corrupt markup. Color is auto-disabled when piped, with `NO_COLOR`, or `--no-color`;
 `_ascii_mode()` (legacy console, non-UTF-8 stream, or `S4_ASCII=1`) switches box glyphs and the

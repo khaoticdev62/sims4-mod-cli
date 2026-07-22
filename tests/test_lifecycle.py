@@ -49,6 +49,13 @@ def test_build_release_uses_release_name(tmp_project, repo_root):
     assert any("-release-" in z.name for z in zips)
 
 
+def test_new_shows_relative_path(tmp_project, repo_root):
+    stdout, _, rc = cli_runner(["new", str(tmp_project), "trait", "RelTrait"], repo_root)
+    assert rc == 0
+    assert str(tmp_project) not in stdout.split("Path:", 1)[1].splitlines()[0]
+    assert "RelTrait_trait" in stdout
+
+
 def test_pipeline_status_renders(tmp_project, repo_root):
     stdout, _, rc = cli_runner(["pipeline", str(tmp_project)], repo_root)
     assert rc == 0

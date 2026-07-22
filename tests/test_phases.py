@@ -159,8 +159,9 @@ def test_install_missing_s4_mods_dir_errors(tmp_project, tmp_path):
 def test_build_zip_passes_integrity_and_excludes(tmp_project, repo_root):
     from tests.utils import cli_runner
     cli_runner(["new", str(tmp_project), "trait", "ZipTrait"], repo_root)
-    _, _, rc = run_cli(["build", str(tmp_project)], REPO_ROOT)
+    stdout, _, rc = run_cli(["build", str(tmp_project)], REPO_ROOT)
     assert rc == 0
+    assert "files" in stdout  # archive stats line (size · N files)
     zips = list((tmp_project / "dist").glob("*.zip"))
     assert len(zips) == 1
     assert zipfile.is_zipfile(zips[0])

@@ -19,6 +19,38 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def test_tui_status_bar_shows_phase_and_progress(tmp_project):
+    cli = _load_cli()
+    from textual.widgets import Static
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(120, 40)):
+            bar = app.query_one("#status-bar", Static)
+            text = str(bar.content)
+            assert "Phase:" in text
+            assert "Progress:" in text
+            assert "Concept" in text
+
+    _run(go())
+
+
+def test_tui_pipeline_statuses_are_colored(tmp_project):
+    cli = _load_cli()
+    from rich.text import Text
+    from textual.widgets import DataTable
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(120, 40)):
+            table = app.query_one("#pipeline", DataTable)
+            cell = table.get_row_at(0)[1]  # Status column, first row (ACTIVE concept)
+            assert isinstance(cell, Text)
+            assert cell.style and cell.plain == "ACTIVE"
+
+    _run(go())
+
+
 def test_tui_app_loads_with_pipeline_table(tmp_project):
     cli = _load_cli()
     from textual.widgets import DataTable

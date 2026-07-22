@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "s4chemist"
-version = "0.6.1"
+version = "0.7.0"
 description = "Portable Sims 4 Mod Construction CLI with Hermes-style TUI and slot-n-lock pipeline."
 readme = "readme.txt"
 license = {text = "MIT"}

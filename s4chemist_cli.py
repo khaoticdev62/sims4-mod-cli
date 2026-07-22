@@ -33,7 +33,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 
 PIPELINE_PHASES = [
     "concept",
@@ -288,17 +288,26 @@ def _write(path: Path, content: str) -> None:
 
 # ── UI layer (rich-powered Hermes style) ─────────────────────────────────
 
+HERMES = {
+    "green": "#3ddc84",
+    "blue": "#5dade2",
+    "yellow": "#f5c542",
+    "red": "#ff5555",
+    "muted": "#8a8a8a",
+}
+
 THEME = Theme(
     {
-        "ok": "bold green",
-        "fail": "bold red",
-        "verified": "green",
-        "local": "yellow",
-        "blocked": "bold red",
-        "accent": "blue",
+        "ok": f"bold {HERMES['green']}",
+        "fail": f"bold {HERMES['red']}",
+        "verified": HERMES["green"],
+        "local": HERMES["yellow"],
+        "blocked": f"bold {HERMES['red']}",
+        "accent": HERMES["blue"],
         "head": "bold white",
-        "hint": "yellow",
-        "glyph": "bold green",
+        "hint": HERMES["yellow"],
+        "glyph": f"bold {HERMES['green']}",
+        "muted": HERMES["muted"],
     }
 )
 
@@ -389,12 +398,13 @@ _META_TAGS = {
 }
 
 
-def _status_panel(headline: str, body: Iterable, *, command: str = "") -> str:
+def _status_panel(headline: str, body: Iterable, *, command: str = "", hints: bool = False) -> str:
     """Render the Hermes-style panel (auto-sized, closed box).
 
     Body items may be Rich-markup strings or Rich renderables (e.g. Table).
     User-derived strings must be escaped with `_esc()` (already handled by
-    `_meta_block`/`_kv_block`).
+    `_meta_block`/`_kv_block`). Footer hint lines are only shown when
+    `hints=True` (help and error panels, where recovery guidance matters).
     """
     footer_command = command or headline.lower()
     items = [Text.from_markup(item) if isinstance(item, str) else item for item in body]
@@ -408,12 +418,12 @@ def _status_panel(headline: str, body: Iterable, *, command: str = "") -> str:
     )
     with _console.capture() as cap:
         _console.print(panel)
-        _console.print(f"[glyph]{_glyph()}[/] [head]s4chemist_cli {_esc(footer_command)} ...[/]")
-        if footer_command != "s4chemist_cli":
-            _console.print(f"[glyph]{_glyph()}[/] Run [hint]'s4chemist_cli doctor'[/]   Verify environment paths.")
-            _console.print(f"[glyph]{_glyph()}[/] Run [hint]'s4chemist_cli help <cmd>'[/]  Show command help.")
-        else:
-            _console.print(f"[glyph]{_glyph()}[/] [head]Enter a command to start.[/]")
+        if hints:
+            if footer_command == "s4chemist_cli":
+                _console.print(f"[glyph]{_glyph()}[/] [head]Enter a command to start.[/]")
+            else:
+                _console.print(f"[glyph]{_glyph()}[/] Run [hint]'s4chemist_cli doctor'[/]   Verify environment paths.")
+                _console.print(f"[glyph]{_glyph()}[/] Run [hint]'s4chemist_cli help <cmd>'[/]  Show command help.")
     return cap.get().rstrip("\n")
 
 
@@ -1804,7 +1814,7 @@ def print_help(*, is_subcommand=False, command="", error="") -> None:
         panel.extend(_section("STATUS KEY", ["  [verified]\\[VERIFIED][/]   = exercised end-to-end", "  [local]\\[LOCAL][/]     = needs environment-specific value", "  [blocked]\\[BLOCKED][/]   = missing dependency / environment"]))
         panel.extend(_section("FOOTER", _help_footer()))
 
-    print(_status_panel(f"{'help' if is_subcommand else 's4chemist_cli'}", panel, command=command if is_subcommand else ""))
+    print(_status_panel(f"{'help' if is_subcommand else 's4chemist_cli'}", panel, command=command if is_subcommand else "", hints=True))
 
 def package_release(proj: Path, out_dir: Path | None = None) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1855,7 +1865,8 @@ def _cmd_new(argv: list[str]) -> int:
     if factory is None:
         print_help(is_subcommand=True, command="new", error=f"Unknown kind: {kind}")
         return 2
-    print(_status_panel("new", _meta_block("verified", "Created", kind) + [f"Path: {factory(proj, name)}"], command="new"))
+    _created = factory(proj, name)
+    print(_status_panel("new", _meta_block("verified", "Created", kind) + [f"Path: {_esc(_rel_display(_created, proj))}"], command="new"))
     _advance_pipeline_if_artifact(proj, f"src/{kind}")
     _advance_pipeline_if_artifact(proj, "src/xml_snippets")
     _advance_pipeline_if_artifact(proj, "src/ts4script")
@@ -1883,6 +1894,27 @@ def _cmd_validate(argv: list[str]) -> int:
     return issues
 
 
+def _archive_stats(out: Path) -> str:
+    """Human summary for a built archive: size + entry count."""
+    size = float(out.stat().st_size)
+    for unit in ("B", "KB", "MB"):
+        if size < 1024 or unit == "MB":
+            size_str = f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+            break
+        size /= 1024
+    with zipfile.ZipFile(out) as zf:
+        count = len(zf.namelist())
+    return f"{size_str} · {count} file{'s' if count != 1 else ''}"
+
+
+def _rel_display(path: Path, proj: Path) -> str:
+    """Display path relative to the project when possible (shorter panels)."""
+    try:
+        return str(path.relative_to(proj))
+    except ValueError:
+        return str(path)
+
+
 def _cmd_build(argv: list[str]) -> int:
     path = _project_path_from_argv(argv)
     release = "--release" in argv
@@ -1891,7 +1923,9 @@ def _cmd_build(argv: list[str]) -> int:
         out = package_release(proj)
     else:
         out = build_project(proj)
-    print(_status_panel("build", _meta_block("verified", "Built", str(out)), command="build"))
+    rows = _meta_block("verified", "Built", _rel_display(out, proj))
+    rows.append(f"         {_archive_stats(out)}")
+    print(_status_panel("build", rows, command="build"))
     _advance_pipeline_if_artifact(proj, "dist")
     return 0
 
@@ -1905,7 +1939,9 @@ def _cmd_package(argv: list[str]) -> int:
             out_dir = argv[idx + 1]
     proj = _existing_project(path)
     out = package_release(proj, out_dir=Path(out_dir) if out_dir else None)
-    print(_status_panel("package", _meta_block("verified", "Packaged", str(out)), command="package"))
+    rows = _meta_block("verified", "Packaged", _rel_display(out, proj))
+    rows.append(f"         {_archive_stats(out)}")
+    print(_status_panel("package", rows, command="package"))
     _advance_pipeline_if_artifact(proj, "dist")
     _advance_pipeline_if_artifact(proj, "tmp/release_manifest.txt")
     return 0
@@ -2015,7 +2051,7 @@ def _cmd_generate(argv: list[str]) -> int:
         save_pipeline_state(proj, state)
     panel = [
         _meta_block("verified", "Generated", f"{mod_type}: {name}")[0],
-        f"Path: {_esc(d)}",
+        f"Path: {_esc(_rel_display(d, proj))}",
         "",
         "[head]Brain Advice:[/]",
         f"  {advice}",
@@ -2225,7 +2261,7 @@ def _cmd_wizard(argv: list[str]) -> int:
     deps = dependency_notes(mod_type)
     panel = [
         _meta_block("verified", "Wizard Complete", f"{mod_type}: {name}")[0],
-        f"Path: {_esc(d)}",
+        f"Path: {_esc(_rel_display(d, proj))}",
         "",
         "[head]Brain Advice:[/]",
         f"  {advice}",
@@ -2250,6 +2286,7 @@ _TUI_CSS = """
 DataTable { height: auto; max-height: 70%; }
 #phase-detail { padding: 0 1; border-top: solid $primary; height: auto; }
 #preview { border-left: solid $primary; }
+#status-bar { padding: 0 1; background: $boost; }
 RichLog { height: 1fr; }
 Horizontal { height: 1fr; }
 WizardScreen { align: center middle; }
@@ -2273,6 +2310,7 @@ def _make_tui_app(project: str = "."):
     from rich.syntax import Syntax
     from textual import on, work
     from textual.app import App, ComposeResult
+    from textual.theme import Theme as TextualTheme
     from textual.command import Hit, Provider
     from textual.containers import Horizontal, Vertical, VerticalScroll
     from textual.screen import ModalScreen
@@ -2386,12 +2424,28 @@ def _make_tui_app(project: str = "."):
             else:
                 app.run_command(action)  # type: ignore[attr-defined]
 
+    hermes_tui_theme = TextualTheme(
+        name="hermes",
+        primary=HERMES["green"],
+        secondary=HERMES["blue"],
+        accent=HERMES["yellow"],
+        success=HERMES["green"],
+        warning=HERMES["yellow"],
+        error=HERMES["red"],
+        dark=True,
+    )
+
     class S4Tui(App):
         CSS = _TUI_CSS
         TITLE = "S4Chemist"
         COMMANDS = App.COMMANDS | {S4Commands}
         history: list = []
         BINDINGS = [("q", "quit", "Quit"), ("r", "refresh", "Refresh"), ("ctrl+p", "command_palette", "Palette")]
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.register_theme(hermes_tui_theme)
+            self.theme = "hermes"
 
         def compose(self) -> ComposeResult:
             yield Header()
@@ -2411,16 +2465,18 @@ def _make_tui_app(project: str = "."):
                     yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="mod_type")
                     yield Input(placeholder="module/object name", id="gen_name")
                     yield Button("Generate", id="generate")
-                with TabbedContent():
-                    with TabPane("Pipeline", id="tab-pipeline"):
-                        yield DataTable(id="pipeline")
-                        yield Static("", id="phase-detail")
-                    with TabPane("Files", id="tab-files"):
-                        with Horizontal():
-                            yield Vertical(id="files-container")
-                            yield RichLog(id="preview", markup=True)
-                    with TabPane("Log", id="tab-log"):
-                        yield RichLog(id="log", markup=True)
+                with Vertical():
+                    yield Static("", id="status-bar")
+                    with TabbedContent():
+                        with TabPane("Pipeline", id="tab-pipeline"):
+                            yield DataTable(id="pipeline")
+                            yield Static("", id="phase-detail")
+                        with TabPane("Files", id="tab-files"):
+                            with Horizontal():
+                                yield Vertical(id="files-container")
+                                yield RichLog(id="preview", markup=True)
+                        with TabPane("Log", id="tab-log"):
+                            yield RichLog(id="log", markup=True)
             yield Footer()
 
         def on_mount(self) -> None:
@@ -2438,18 +2494,37 @@ def _make_tui_app(project: str = "."):
         def refresh_pipeline(self) -> None:
             table = self.query_one("#pipeline", DataTable)
             table.clear()
+            bar = self.query_one("#status-bar", Static)
             proj = Path(self._proj())
             if not (proj / "s4modconfig.yaml").exists():
                 table.add_row("-", "-", "not a project (set path or run init)")
+                bar.update(Text.assemble(("● ", f"bold {HERMES['red']}"), (self._proj(), "bold white"), ("  not a project", HERMES["muted"])))
                 self._show_phase_detail(-1)
                 return
             state = load_pipeline_state(proj)
-            cur = current_phase(state)
+            cur, done, total, pct = phase_progress(state)
             for p in PIPELINE_PHASES:
                 locked = is_phase_locked(state, p)
                 active = p == cur and not locked
                 marker = "DONE" if locked else ("ACTIVE" if active else "WAIT")
-                table.add_row(PIPELINE_META[p]["name"], marker, PIPELINE_META[p]["hint"])
+                style = f"bold {HERMES['green']}" if locked else (f"bold {HERMES['yellow']}" if active else HERMES["muted"])
+                table.add_row(
+                    Text(PIPELINE_META[p]["name"], style="bold white"),
+                    Text(marker, style=style),
+                    Text(PIPELINE_META[p]["hint"], style=HERMES["muted"] if not (locked or active) else ""),
+                )
+            cur_meta = PIPELINE_META[cur]
+            bar.update(
+                Text.assemble(
+                    ("● ", f"bold {HERMES['green']}"),
+                    (proj.name, "bold white"),
+                    ("   Phase: ", "bold white"),
+                    (f"{cur_meta['name']} ", f"bold {HERMES['yellow']}"),
+                    ("  Progress: ", "bold white"),
+                    (f"{done}/{total} ({pct}%) ", ""),
+                    (_progress_bar(pct), f"bold {HERMES['green']}"),
+                )
+            )
             self._show_phase_detail(PIPELINE_PHASES.index(cur))
 
         def _show_phase_detail(self, index: int) -> None:
@@ -2762,24 +2837,39 @@ def interactive_shell(reader: Callable[[], str | None] | None = None) -> int:
 # ── Menu mode (arrow-key navigation, questionary) ──────────────────────────
 
 
+def _qstyle():
+    """Hermes-branded questionary style (menus match the panel palette)."""
+    from questionary import Style
+
+    return Style([
+        ("qmark", f"fg:{HERMES['green']} bold"),
+        ("question", "bold"),
+        ("pointer", f"fg:{HERMES['green']} bold"),
+        ("highlighted", f"fg:{HERMES['blue']} bold"),
+        ("selected", f"fg:{HERMES['blue']}"),
+        ("answer", f"fg:{HERMES['green']} bold"),
+        ("instruction", HERMES["muted"]),
+    ])
+
+
 def _menu_select(message: str, choices: list[str]) -> str | None:
     import questionary
 
-    result: str | None = questionary.select(message, choices=choices).ask()
+    result: str | None = questionary.select(message, choices=choices, style=_qstyle()).ask()
     return result
 
 
 def _menu_text(message: str, default: str = "") -> str | None:
     import questionary
 
-    result: str | None = questionary.text(message, default=default).ask()
+    result: str | None = questionary.text(message, default=default, style=_qstyle()).ask()
     return result
 
 
 def _menu_confirm(message: str, default: bool = False) -> bool:
     import questionary
 
-    return bool(questionary.confirm(message, default=default).ask())
+    return bool(questionary.confirm(message, default=default, style=_qstyle()).ask())
 
 
 def _menu_flow(command: str) -> list[str] | None:

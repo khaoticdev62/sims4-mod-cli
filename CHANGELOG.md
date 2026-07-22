@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 — 2026-07-22
+
+Deep UI refinement: one Hermes design system across all three interfaces.
+
+### Changed
+- Shared `HERMES` palette (green/blue/yellow/red/muted hex tokens) now drives the rich theme,
+  a registered Textual theme, and the questionary menu style — panels, menus, and the TUI
+  finally look like one app
+- Footer hints ("Run doctor / Run help…") only appear on help and error panels; normal command
+  output is just the panel — dramatically less noise
+- Result summaries: `build`/`package` show archive size + file count; artifact paths display
+  relative to the project instead of absolute
+- TUI status bar above the tabs: project name, current phase, and progress bar at a glance;
+  pipeline rows are color-coded (DONE green / ACTIVE yellow / WAIT muted)
+
 ## 0.6.1 — 2026-07-22
 
 Full feature audit (67 end-to-end checks across all commands, UI modes, and artifacts).
