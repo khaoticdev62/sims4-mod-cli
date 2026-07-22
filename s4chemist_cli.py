@@ -33,7 +33,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 PIPELINE_PHASES = [
     "concept",
@@ -2241,6 +2241,151 @@ def _cmd_wizard(argv: list[str]) -> int:
     return 0
 
 
+# ── Textual TUI (full dashboard; launched via `tui`) ───────────────────────
+
+_TUI_CSS = """
+#sidebar { width: 30; padding: 1; border-right: solid $primary; }
+#sidebar Label { margin-top: 1; }
+#sidebar Button { width: 100%; margin-top: 1; }
+DataTable { height: auto; max-height: 55%; }
+RichLog { border-top: solid $primary; height: 1fr; }
+Horizontal { height: 1fr; }
+"""
+
+
+def _make_tui_app(project: str = "."):
+    """Build the Textual dashboard app. Imports are deferred so plain CLI
+    commands stay fast and do not require textual installed."""
+    from textual import on, work
+    from textual.app import App, ComposeResult
+    from textual.containers import Horizontal, Vertical, VerticalScroll
+    from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, Select
+
+    class S4Tui(App):
+        CSS = _TUI_CSS
+        TITLE = "S4Chemist"
+        BINDINGS = [("q", "quit", "Quit"), ("r", "refresh", "Refresh")]
+
+        def compose(self) -> ComposeResult:
+            yield Header()
+            with Horizontal():
+                with VerticalScroll(id="sidebar"):
+                    yield Label("Project")
+                    yield Input(value=project, placeholder="project path", id="project")
+                    yield Label("Commands")
+                    yield Button("Validate", id="validate")
+                    yield Button("Build", id="build")
+                    yield Button("Package", id="package")
+                    yield Button("Changelog", id="changelog")
+                    yield Button("Tune IDs", id="tune-ids")
+                    yield Button("Doctor", id="doctor")
+                    yield Label("Generate")
+                    yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="mod_type")
+                    yield Input(placeholder="module/object name", id="gen_name")
+                    yield Button("Generate", id="generate")
+                with Vertical():
+                    yield DataTable(id="pipeline")
+                    yield RichLog(id="log", markup=True)
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#pipeline", DataTable).add_columns("Phase", "Status", "Hint")
+            self.refresh_pipeline()
+
+        def action_refresh(self) -> None:
+            self.refresh_pipeline()
+
+        def _proj(self) -> str:
+            return self.query_one("#project", Input).value.strip() or "."
+
+        def refresh_pipeline(self) -> None:
+            table = self.query_one("#pipeline", DataTable)
+            table.clear()
+            proj = Path(self._proj())
+            if not (proj / "s4modconfig.yaml").exists():
+                table.add_row("-", "-", "not a project (set path or run init)")
+                return
+            state = load_pipeline_state(proj)
+            cur = current_phase(state)
+            for p in PIPELINE_PHASES:
+                locked = is_phase_locked(state, p)
+                active = p == cur and not locked
+                marker = "DONE" if locked else ("ACTIVE" if active else "WAIT")
+                table.add_row(PIPELINE_META[p]["name"], marker, PIPELINE_META[p]["hint"])
+
+        def _append_log(self, argv: list[str], text: str, rc: int) -> None:
+            log = self.query_one("#log", RichLog)
+            log.write(f"[bold]$ s4chemist_cli {' '.join(argv)}[/]  (exit {rc})")
+            if text.strip():
+                log.write(text.rstrip())
+            log.write("")
+
+        @work(thread=True)
+        def run_command(self, argv: list[str]) -> None:
+            import contextlib
+            import io
+
+            buf = io.StringIO()
+            rc = 0
+            with contextlib.redirect_stdout(buf):
+                try:
+                    rc = main(argv)
+                except SystemExit as exc:
+                    rc = 1
+                    if exc.code:
+                        print(exc.code)
+                except Exception as exc:  # keep the UI alive on command errors
+                    rc = 1
+                    print(f"error: {exc}")
+            self.call_from_thread(self._append_log, argv, buf.getvalue(), rc)
+            self.call_from_thread(self.refresh_pipeline)
+
+        @on(Button.Pressed, "#validate")
+        def _validate(self) -> None:
+            self.run_command(["validate", self._proj()])
+
+        @on(Button.Pressed, "#build")
+        def _build(self) -> None:
+            self.run_command(["build", self._proj()])
+
+        @on(Button.Pressed, "#package")
+        def _package(self) -> None:
+            self.run_command(["package", self._proj()])
+
+        @on(Button.Pressed, "#changelog")
+        def _changelog(self) -> None:
+            self.run_command(["changelog", self._proj()])
+
+        @on(Button.Pressed, "#tune-ids")
+        def _tune_ids(self) -> None:
+            self.run_command(["tune-ids", self._proj()])
+
+        @on(Button.Pressed, "#doctor")
+        def _doctor(self) -> None:
+            self.run_command(["doctor"])
+
+        @on(Button.Pressed, "#generate")
+        def _generate(self) -> None:
+            name = self.query_one("#gen_name", Input).value.strip()
+            if not name:
+                self._append_log(["generate"], "name is required", 2)
+                return
+            mod_type = self.query_one("#mod_type", Select).value
+            self.run_command(["generate", str(mod_type), name])
+
+        @on(Input.Submitted, "#project")
+        def _project_submitted(self) -> None:
+            self.refresh_pipeline()
+
+    return S4Tui()
+
+
+def _cmd_tui(argv: list[str]) -> int:
+    project = argv[1] if len(argv) > 1 else "."
+    _make_tui_app(project).run()
+    return 0
+
+
 COMMANDS: dict[str, Command] = {
     entry.name: entry
     for entry in [
@@ -2342,6 +2487,13 @@ COMMANDS: dict[str, Command] = {
             _cmd_changelog,
             usage="changelog [path]",
             description="Add/update CHANGELOG.md.",
+        ),
+        Command(
+            "tui",
+            _cmd_tui,
+            args=["  path       Project path to load in the dashboard, default '.'."],
+            usage="tui [path]",
+            description="Open the full dashboard UI (Textual).",
         ),
         Command("tune-ids", _cmd_tune_ids),
         Command("pipeline", _cmd_pipeline),

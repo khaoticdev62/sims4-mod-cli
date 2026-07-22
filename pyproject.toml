@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "s4chemist"
-version = "0.4.0"
+version = "0.5.0"
 description = "Portable Sims 4 Mod Construction CLI with Hermes-style TUI and slot-n-lock pipeline."
 readme = "readme.txt"
 license = {text = "MIT"}
@@ -18,7 +18,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["rich>=13", "questionary>=2"]
+dependencies = ["rich>=13", "questionary>=2", "textual>=8"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=4.0", "ruff>=0.4", "mypy>=1.9", "pyinstaller"]

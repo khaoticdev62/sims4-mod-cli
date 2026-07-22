@@ -1,0 +1,7 @@
+mod_name: ReplaceMe
+creator: YourName
+version: 0.1.0
+mod_type: xml_snippet
+xml_injector_required: false
+game_versions:
+  - '*'

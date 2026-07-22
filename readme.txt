@@ -20,6 +20,7 @@ Common commands:
 - python s4chemist_cli.py pipeline unlock/status/next/reset [path]
 - python s4chemist_cli.py install [path] [--to-dir <dir>]   (or set S4_MODS_DIR)
 - python s4chemist_cli.py doctor
+- python s4chemist_cli.py tui [path]   (full dashboard UI)
 - python s4chemist_cli.py version
 
 Notes:

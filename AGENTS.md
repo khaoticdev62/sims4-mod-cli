@@ -6,7 +6,8 @@ Guidance for AI coding agents working in this repository. Assumes no prior knowl
 
 S4Chemist (package name `s4chemist`, CLI entry point `s4chemist_cli`) is a portable, single-file
 Python CLI for scaffolding, validating, and packaging Sims 4 mod projects. The entire implementation
-lives in one module: `s4chemist_cli.py` (~2300 lines). Runtime dependencies are `rich` (panels/tables) and `questionary`+`prompt_toolkit` (menus/REPL)
+lives in one module: `s4chemist_cli.py` (~2300 lines). Runtime dependencies are `rich` (panels/tables), `questionary`+`prompt_toolkit` (menus/REPL),
+and `textual` (the `tui` dashboard)
 (for the terminal UI); Python >= 3.9 is required.
 
 Key files:
@@ -120,7 +121,8 @@ manually via `pipeline unlock/reset`.
 - `doctor_check()` / `ensure_game_python()` are environment probes with no side effects.
 
 ### Output styling
-The UI is built on `rich` (panels/tables) with `questionary`/`prompt_toolkit` for menus and the REPL. All commands render through shared
+The UI is built on `rich` (panels/tables) with `questionary`/`prompt_toolkit` for menus and the REPL, and `textual` for the
+`tui` dashboard (pipeline table, command buttons, generate form, log pane). All commands render through shared
 helpers — `_status_panel` (auto-sized closed panel; body items may be markup strings or Rich
 renderables like `Table`), `_meta_block`, `_kv_block`, `_section` — styled by the `THEME`
 tags. Rules: never inline raw ANSI; always escape user-derived strings with `_esc()`.

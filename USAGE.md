@@ -43,6 +43,8 @@ If `doctor` says `MISSING Sims 4 Documents`, install The Sims 4 or create the fo
 - `s4chemist_cli build .` — create `dist/*.zip`
 - `s4chemist_cli install .` — copy to detected Mods folder (override with `--to-dir <dir>`
   or the `S4_MODS_DIR` environment variable)
+- `s4chemist_cli tui .` — open the full dashboard (live pipeline table, one-click commands,
+  generate form, log pane)
 
 ## Troubleshooting
 - `doctor` shows `MISSING Mods Folder`: create `Documents\Electronic Arts\The Sims 4\Mods`

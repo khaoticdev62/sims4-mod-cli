@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 — 2026-07-22
+
+### Added
+- `tui [path]` command: full Textual dashboard — live pipeline table (auto-refreshing),
+  command buttons (validate/build/package/changelog/tune-ids/doctor) streaming output into a
+  log pane, a generate form (mod type + name), project path input, `q`/`r` key bindings.
+  Registered as a normal command, so it also appears in the menu, REPL completion, and help.
+
 ## 0.4.0 — 2026-07-22
 
 UI level-up: menu navigation + live feedback (adds `questionary`/`prompt_toolkit` dependency,
