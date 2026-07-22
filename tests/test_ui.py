@@ -110,19 +110,105 @@ def test_bare_launch_piped_prints_help_and_exits():
     assert "COMMANDS" in stdout
 
 
-def test_interactive_shell_runs_commands_and_exits(tmp_project):
-    typed = "version\nbadcmd\nexit\n"
-    output, rc = run_wizard_in_process(tmp_project, [], typed)
+def _load_cli():
+    import importlib
+
+    sys.path.insert(0, str(REPO_ROOT))
+    import s4chemist_cli as cli
+    importlib.reload(cli)
+    return cli
+
+
+def _capture_console():
+    class FakeTTY(io.StringIO):
+        def isatty(self):
+            return True
+
+    old_stdin, old_stdout = sys.stdin, sys.stdout
+    sys.stdin = FakeTTY("")
+    sys.stdout = FakeTTY()
+    return old_stdin, old_stdout
+
+
+def test_interactive_shell_runs_commands_and_exits():
+    cli = _load_cli()
+    old_stdin, old_stdout = _capture_console()
+    try:
+        lines = iter(["version", "badcmd", "exit"])
+        rc = cli.interactive_shell(reader=lambda: next(lines, None))
+        output = sys.stdout.getvalue()
+    finally:
+        sys.stdin, sys.stdout = old_stdin, old_stdout
     assert rc == 0
     assert "COMMANDS" in output               # help shown on entry
     assert "s4chemist_cli v" in output        # dispatched 'version'
     assert "Unknown command: badcmd" in output  # error shown, shell kept going
 
 
-def test_interactive_shell_quit_alias(tmp_project):
-    output, rc = run_wizard_in_process(tmp_project, [], "quit\n")
+def test_interactive_shell_quit_alias():
+    cli = _load_cli()
+    old_stdin, old_stdout = _capture_console()
+    try:
+        lines = iter(["quit"])
+        rc = cli.interactive_shell(reader=lambda: next(lines, None))
+        output = sys.stdout.getvalue()
+    finally:
+        sys.stdin, sys.stdout = old_stdin, old_stdout
     assert rc == 0
     assert "COMMANDS" in output
+
+
+def test_menu_runs_command_and_exits():
+    cli = _load_cli()
+    old_stdin, old_stdout = _capture_console()
+    try:
+        choices = iter(["version", "Exit"])
+        rc = cli.menu_shell(select=lambda _msg, _opts: next(choices, "Exit"))
+        output = sys.stdout.getvalue()
+    finally:
+        sys.stdin, sys.stdout = old_stdin, old_stdout
+    assert rc == 0
+    assert "s4chemist_cli v" in output
+
+
+def test_menu_cancel_is_safe():
+    cli = _load_cli()
+    old_stdin, old_stdout = _capture_console()
+    try:
+        # Esc/Ctrl+C on the main menu (None) exits cleanly with no dispatch
+        rc = cli.menu_shell(select=lambda _msg, _opts: None)
+    finally:
+        sys.stdin, sys.stdout = old_stdin, old_stdout
+    assert rc == 0
+
+
+def test_menu_flow_new_collects_args():
+    cli = _load_cli()
+    answers = {"Existing project path": "/tmp/proj", "Artifact/module name": "CoolTrait"}
+    cli._menu_text = lambda msg, default="": answers.get(msg, default)
+    cli._menu_select = lambda msg, choices: "trait"
+    assert cli._menu_flow("new") == ["new", "/tmp/proj", "trait", "CoolTrait"]
+
+
+def test_menu_flow_validate_strict_flag():
+    cli = _load_cli()
+    cli._menu_text = lambda msg, default="": default
+    cli._menu_confirm = lambda msg, default=False: True
+    assert cli._menu_flow("validate") == ["validate", ".", "--strict"]
+
+
+def test_menu_flow_generate_params():
+    cli = _load_cli()
+    answers = {"Module or object name": "MyBuff", "Params k=v, comma-separated (optional)": "label=Chill, mood_weight=3"}
+    cli._menu_text = lambda msg, default="": answers.get(msg, default)
+    cli._menu_select = lambda msg, choices: "buff"
+    assert cli._menu_flow("generate") == ["generate", "buff", "MyBuff", "--param", "label=Chill", "--param", "mood_weight=3"]
+
+
+def test_menu_flow_cancel_returns_none():
+    cli = _load_cli()
+    cli._menu_text = lambda msg, default="": None  # user pressed Esc
+    assert cli._menu_flow("init") is None
 
 
 def test_wizard_interactive_confirm_accept(tmp_project):

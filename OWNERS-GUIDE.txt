@@ -16,7 +16,7 @@ HOW TO ASK BIG HERM TO USE IT
 WHAT YOU NEED
 - Windows PC with Python 3.10+ installed
 - The Sims 4 installed on this PC for install/doctor checks
-- `rich` package for source runs (`pip install rich`); the portable .exe needs nothing extra
+- `rich` and `questionary` packages for source runs (`pip install rich questionary`); the portable .exe needs nothing extra
 
 SHORTCUT
 SK="C:\Users\thecr\sims4-mod-cli\s4chemist_cli.py"

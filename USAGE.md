@@ -7,8 +7,9 @@ This guide is for players and modders who want to use S4Chemist-generated mods.
 ### Windows zip
 1. Download `S4Chemist-portable-*.zip` from the latest GitHub release.
 2. Extract it anywhere, e.g. `C:\Tools\S4Chemist`.
-3. Open that folder and double-click `s4chemist_cli.exe` — it opens an interactive
-   `❯ s4chemist_cli` prompt. Type commands (e.g. `doctor`, `help new`), then `exit` to quit.
+3. Open that folder and double-click `s4chemist_cli.exe` — it opens an arrow-key menu.
+   Pick a command, answer its prompts, or choose "Type a command..." for a prompt with
+   history and tab-completion. Esc backs out; "Exit" quits.
 
 If the window closes immediately, open Command Prompt in that folder and run:
 - `python s4chemist_cli.py doctor`

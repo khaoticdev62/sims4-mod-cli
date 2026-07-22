@@ -21,6 +21,7 @@ from rich import box
 from rich.console import Console, Group
 from rich.markup import escape as _escape_markup
 from rich.panel import Panel
+from rich.progress import track
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.text import Text
@@ -32,7 +33,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 PIPELINE_PHASES = [
     "concept",
@@ -1578,6 +1579,13 @@ MOD_FACTORIES = {
 
 def validate_project_issues(proj: Path, strict: bool = False) -> list[str]:
     """Return actionable validation issues for a project (see docs/validation.md)."""
+    if _console.is_terminal:
+        with _console.status("[accent]Scanning project...[/]"):
+            return _validate_project_issues(proj, strict=strict)
+    return _validate_project_issues(proj, strict=strict)
+
+
+def _validate_project_issues(proj: Path, strict: bool = False) -> list[str]:
     issues: list[str] = []
     if strict:
         cfg = proj / "s4modconfig.yaml"
@@ -1652,8 +1660,10 @@ def _verify_archive(out: Path) -> None:
 
 def _zip_project(proj: Path, out: Path, *, extra_excludes: tuple[str, ...] = ()) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
+    paths = sorted(proj.rglob("*"))
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(proj.rglob("*")):
+        for path in track(paths, description="[accent]Zipping...[/]", console=_console,
+                          disable=not _console.is_terminal, transient=True):
             if path.is_dir():
                 continue
             rel = path.relative_to(proj)
@@ -2052,7 +2062,9 @@ def _cmd_tune_ids(argv: list[str]) -> int:
         return 2
     proj = _existing_project(argv[1])
     touched = []
-    for xml in sorted(proj.rglob("*.xml")):
+    xml_files = sorted(proj.rglob("*.xml"))
+    for xml in track(xml_files, description="[accent]Tuning...[/]", console=_console,
+                     disable=not _console.is_terminal, transient=True):
         txt = xml.read_text(encoding="utf-8", errors="ignore")
         updated = txt
         updated, _ = _rewrite_stbl_placeholders(xml.stem, updated)
@@ -2341,30 +2353,188 @@ COMMANDS: dict[str, Command] = {
 }
 
 
-def interactive_shell() -> int:
-    """REPL used when launched with no arguments on a real terminal
-    (e.g. double-clicking the exe): shows help, then accepts commands until
-    'exit'/'quit', EOF, or Ctrl+C."""
+_SHELL_HISTORY = Path.home() / ".s4chemist_history"
+
+
+def _dispatch_shell_line(line: str) -> bool:
+    """Run one REPL/menu command line. Returns False when the user asked to exit."""
+    line = line.strip()
+    if not line:
+        return True
+    if line.lower() in ("exit", "quit", ":q"):
+        return False
+    try:
+        args = shlex.split(line)
+    except ValueError as exc:
+        _console.print(f"[fail]{_esc(exc)}[/]")
+        return True
+    try:
+        main(args)
+    except SystemExit as exc:  # e.g. _existing_project() rejects a path
+        if exc.code:
+            _console.print(f"[fail]{_esc(exc.code)}[/]")
+    except KeyboardInterrupt:
+        _console.print("[local]Interrupted[/]")
+    return True
+
+
+def interactive_shell(reader: Callable[[], str | None] | None = None) -> int:
+    """REPL around the COMMANDS dispatch with persistent history + completion.
+
+    `reader` is injectable for tests; by default a prompt_toolkit session is
+    used (history in ~/.s4chemist_history, command-name completion).
+    """
     print_help(is_subcommand=False, command="")
+    if reader is None:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit.history import FileHistory
+
+        session: PromptSession = PromptSession(
+            history=FileHistory(str(_SHELL_HISTORY)),
+            completer=WordCompleter(
+                [e.name for e in COMMANDS.values() if e.description], sentence=True
+            ),
+        )
+        prompt_text = f"{_glyph()} s4chemist_cli "
+
+        def reader() -> str | None:
+            try:
+                result: str = session.prompt(prompt_text)
+                return result
+            except (EOFError, KeyboardInterrupt):
+                return None
+
     while True:
-        try:
-            line = Prompt.ask(f"[glyph]{_glyph()}[/] [head]s4chemist_cli[/]", console=_console)
-        except (EOFError, KeyboardInterrupt):
+        line = reader()
+        if line is None:
             _console.print()
             return 0
-        line = (line or "").strip()
-        if not line:
-            continue
-        if line.lower() in ("exit", "quit", ":q"):
+        if not _dispatch_shell_line(line):
             return 0
-        try:
-            args = shlex.split(line)
-        except ValueError as exc:
-            _console.print(f"[fail]{_esc(exc)}[/]")
+
+
+# ── Menu mode (arrow-key navigation, questionary) ──────────────────────────
+
+
+def _menu_select(message: str, choices: list[str]) -> str | None:
+    import questionary
+
+    result: str | None = questionary.select(message, choices=choices).ask()
+    return result
+
+
+def _menu_text(message: str, default: str = "") -> str | None:
+    import questionary
+
+    result: str | None = questionary.text(message, default=default).ask()
+    return result
+
+
+def _menu_confirm(message: str, default: bool = False) -> bool:
+    import questionary
+
+    return bool(questionary.confirm(message, default=default).ask())
+
+
+def _menu_flow(command: str) -> list[str] | None:
+    """Collect argv for `command` via menu prompts; None = cancelled (Esc/Ctrl+C)."""
+    if command == "init":
+        name = _menu_text("Project directory / mod name")
+        return ["init", name] if name else None
+    if command == "new":
+        where = _menu_text("Existing project path", ".")
+        if where is None:
+            return None
+        kind = _menu_select("Kind", list(MOD_FACTORIES))
+        if not kind:
+            return None
+        name = _menu_text("Artifact/module name")
+        if not name:
+            return None
+        return ["new", where, kind, name]
+    if command == "validate":
+        path = _menu_text("Project path", ".")
+        if path is None:
+            return None
+        argv = ["validate", path]
+        if _menu_confirm("Strict checks (placeholder ids/template values too)?"):
+            argv.append("--strict")
+        return argv
+    if command == "build":
+        path = _menu_text("Project path", ".")
+        if path is None:
+            return None
+        argv = ["build", path]
+        if _menu_confirm("Release packaging semantics (same as 'package')?"):
+            argv.append("--release")
+        return argv
+    if command == "package":
+        path = _menu_text("Project path", ".")
+        if path is None:
+            return None
+        out = _menu_text("Output dir (blank = project dist)", "")
+        if out is None:
+            return None
+        argv = ["package", path]
+        if out:
+            argv += ["--out-dir", out]
+        return argv
+    if command == "install":
+        path = _menu_text("Project path", ".")
+        if path is None:
+            return None
+        to = _menu_text("Mods dir (blank = auto-detect / S4_MODS_DIR)", "")
+        if to is None:
+            return None
+        argv = ["install", path]
+        if to:
+            argv += ["--to-dir", to]
+        return argv
+    if command in ("generate", "wizard"):
+        mod_type = _menu_select("Mod type", list(MOD_FACTORIES))
+        if not mod_type:
+            return None
+        name = _menu_text("Module or object name")
+        if not name:
+            return None
+        argv = [command, mod_type, name]
+        kv = _menu_text("Params k=v, comma-separated (optional)", "")
+        if kv is None:
+            return None
+        for pair in [p.strip() for p in kv.split(",") if p.strip()]:
+            argv += ["--param", pair]
+        return argv
+    if command == "changelog":
+        path = _menu_text("Project path", ".")
+        return ["changelog", path] if path is not None else None
+    if command == "help":
+        target = _menu_select("Help for command", [e.name for e in COMMANDS.values() if e.description])
+        return ["help", target] if target else None
+    return [command]  # doctor, version
+
+
+MENU_EXIT = "Exit"
+MENU_SHELL = "Type a command..."
+
+
+def menu_shell(select: Callable[[str, list[str]], str | None] | None = None) -> int:
+    """Arrow-key main menu shown on bare TTY launch. `select` injectable for tests."""
+    select = select or _menu_select
+    visible = [e.name for e in COMMANDS.values() if e.description]
+    while True:
+        choice = select("S4Chemist - pick a command", visible + [MENU_SHELL, MENU_EXIT])
+        if choice in (None, MENU_EXIT):
+            return 0
+        if choice == MENU_SHELL:
+            interactive_shell()
+            continue
+        argv = _menu_flow(choice)
+        if argv is None:
             continue
         try:
-            main(args)
-        except SystemExit as exc:  # e.g. _existing_project() rejects a path
+            main(argv)
+        except SystemExit as exc:
             if exc.code:
                 _console.print(f"[fail]{_esc(exc.code)}[/]")
         except KeyboardInterrupt:
@@ -2378,7 +2548,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not argv:
         if sys.stdin.isatty() and sys.stdout.isatty():
-            return interactive_shell()
+            return menu_shell()
         print_help(is_subcommand=False, command="")
         return 0
     if argv[:1] in (["-h"], ["--help"]):

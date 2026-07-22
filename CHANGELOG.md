@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 — 2026-07-22
+
+UI level-up: menu navigation + live feedback (adds `questionary`/`prompt_toolkit` dependency,
+bundled in the exe).
+
+### Added
+- Arrow-key main menu on bare TTY launch: pick any command, answer guided prompts for its
+  arguments (paths, kinds, flags, --param), or choose "Type a command..." for the REPL.
+  Esc/Ctrl+C backs out safely at every step.
+- REPL upgrades: persistent history (`~/.s4chemist_history`) and command-name tab-completion
+  via prompt_toolkit.
+- Live feedback: progress bars while zipping (`build`/`package`) and tuning ids, spinner while
+  `validate` scans (terminal only; piped output unchanged).
+
 ## 0.3.1 — 2026-07-22
 
 ### Added

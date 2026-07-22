@@ -6,7 +6,7 @@ Guidance for AI coding agents working in this repository. Assumes no prior knowl
 
 S4Chemist (package name `s4chemist`, CLI entry point `s4chemist_cli`) is a portable, single-file
 Python CLI for scaffolding, validating, and packaging Sims 4 mod projects. The entire implementation
-lives in one module: `s4chemist_cli.py` (~2300 lines). The only runtime dependency is `rich`
+lives in one module: `s4chemist_cli.py` (~2300 lines). Runtime dependencies are `rich` (panels/tables) and `questionary`+`prompt_toolkit` (menus/REPL)
 (for the terminal UI); Python >= 3.9 is required.
 
 Key files:
@@ -70,8 +70,9 @@ python s4chemist_cli.py doctor
 ### Command dispatch
 `main()` (near the bottom of `s4chemist_cli.py`) dispatches through the `COMMANDS` registry: a
 dict of `Command` entries mapping each command name to a `_cmd_<name>(argv) -> int` handler. Bare
-launch with no args opens `interactive_shell()` (a REPL around the same dispatch) when stdin and
-stdout are TTYs, and prints help otherwise. Each handler parses its own flags positionally,
+launch on a TTY opens `menu_shell()` (questionary arrow-key menu; `_menu_flow()` builds argv per
+command) with a "Type a command..." option that drops into `interactive_shell()` (prompt_toolkit
+REPL with history + completion); piped launches print help and exit. Each handler parses its own flags positionally,
 calls the relevant function, prints a `_status_panel(...)` block, and returns an int exit code. Help
 text is data-driven: `Command.args` feeds the ARGS section of subcommand help and `Command.help_lines`
 feeds the main COMMANDS panel. When adding a new top-level command, add a `_cmd_<name>` handler and a
@@ -119,7 +120,7 @@ manually via `pipeline unlock/reset`.
 - `doctor_check()` / `ensure_game_python()` are environment probes with no side effects.
 
 ### Output styling
-The UI is built on `rich` (the only runtime dependency). All commands render through shared
+The UI is built on `rich` (panels/tables) with `questionary`/`prompt_toolkit` for menus and the REPL. All commands render through shared
 helpers — `_status_panel` (auto-sized closed panel; body items may be markup strings or Rich
 renderables like `Table`), `_meta_block`, `_kv_block`, `_section` — styled by the `THEME`
 tags. Rules: never inline raw ANSI; always escape user-derived strings with `_esc()`.
