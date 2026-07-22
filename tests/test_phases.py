@@ -16,13 +16,19 @@ def run_cli(args, cwd, env_extra=None):
     result = subprocess.run(
         [sys.executable, str(CLI), *args],
         cwd=str(cwd),
-        capture_output=True,
-        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         timeout=120,
         stdin=subprocess.DEVNULL,  # force non-interactive
         env=env,
     )
-    return result.stdout, result.stderr, result.returncode
+    # Decode manually: text=True loses output on some Windows Pythons (3.11.9)
+    # because the CLI reconfigures its stdout to UTF-8.
+    return (
+        result.stdout.decode("utf-8", errors="replace"),
+        result.stderr.decode("utf-8", errors="replace"),
+        result.returncode,
+    )
 
 
 # --- Phase 3: validation -------------------------------------------------
