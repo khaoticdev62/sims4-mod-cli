@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.4 — 2026-07-22
+
+### Changed
+- Guided mod creation is no longer a modal: it is now a full-size **Create tab** in the
+  dashboard (Pipeline / Create / Files / Log). The modal kept fighting small consoles —
+  clipped fields, unreachable buttons, cramped dropdown. The tab gives the form real estate:
+  type select with all 18 kinds, name input, scrollable parameter area, inline validation,
+  and a permanently visible Create button. Sidebar "Create" button and the command palette
+  entry both jump to the tab.
+
 ## 0.9.3 — 2026-07-22
 
 ### Fixed

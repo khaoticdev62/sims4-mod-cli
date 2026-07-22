@@ -34,7 +34,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 
 PIPELINE_PHASES = [
     "concept",
@@ -2352,13 +2352,11 @@ RichLog { height: 1fr; }
 Horizontal { height: 1fr; }
 Input:focus { border: round $secondary; }
 Select:focus { border: round $secondary; }
-WizardScreen { align: center middle; }
-#wizard-form { width: 64; height: auto; max-height: 90%; padding: 1 2; border: round $primary; background: $surface; }
-#wizard-form Label { margin-top: 1; color: $text-muted; text-style: bold; }
-#w-fields { height: 1fr; min-height: 5; overflow-y: auto; }
-#w_actions { height: auto; margin-top: 1; }
-#w_actions Button { margin-right: 1; }
+#create-form { padding: 1 2; }
+#create-form Label { margin-top: 1; color: $text-muted; text-style: bold; }
+#w_params_scroll { height: 1fr; min-height: 5; border: round $boost; padding: 0 1; }
 #w_error { color: $error; text-style: bold; }
+#w_create { margin-top: 1; }
 """
 
 _PREVIEW_LEXERS = {
@@ -2378,82 +2376,10 @@ def _make_tui_app(project: str = "."):
     from textual.theme import Theme as TextualTheme
     from textual.command import Hit, Provider
     from textual.containers import Horizontal, Vertical, VerticalScroll
-    from textual.screen import ModalScreen
     from textual.widgets import (
         Button, DataTable, DirectoryTree, Footer, Header, Input, Label,
         RichLog, Select, Static, TabbedContent, TabPane,
     )
-
-    class WizardScreen(ModalScreen):
-        """Multi-field guided-creation form (dynamic params per mod type)."""
-
-        _params_built_for: str | None = None
-
-        def compose(self) -> ComposeResult:
-            with Vertical(id="wizard-form"):
-                yield Label(f"[bold]{_brand_glyph()} Guided mod creation[/]")
-                with VerticalScroll(id="w-fields"):
-                    yield Label("Mod type")
-                    yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="w_type")
-                    yield Label("Name (required)")
-                    yield Input(placeholder="module/object name", id="w_name")
-                    yield Label("Parameters")
-                    yield Vertical(id="w_params")
-                yield Label("", id="w_error")
-                with Horizontal(id="w_actions"):
-                    yield Button("Create", id="w_create", variant="success")
-                    yield Button("Cancel", id="w_cancel")
-
-        async def on_mount(self) -> None:
-            await self._build_params()
-
-        @on(Select.Changed, "#w_type")
-        async def _type_changed(self) -> None:
-            await self._build_params()
-
-        async def _build_params(self) -> None:
-            """(Re)build param inputs for the selected type.
-
-            remove_children() is async in Textual — it must be awaited, otherwise
-            the new Inputs register while the old ones still exist (DuplicateIds).
-            """
-            container = self.query_one("#w_params", Vertical)
-            mod_type = str(self.query_one("#w_type", Select).value)
-            if self._params_built_for == mod_type:
-                return
-            self._params_built_for = mod_type
-            preset = wizard_presets(mod_type)
-            wanted = [(f, preset.get("defaults", {}).get(f, "")) for f in preset.get("params", [])]
-            existing = {w.placeholder: w for w in container.children if isinstance(w, Input)}
-            if list(existing) == [f for f, _ in wanted]:
-                return
-            await container.remove_children()
-            for param_field, default in wanted:
-                await container.mount(Input(value=default, placeholder=param_field, id=f"w_param_{param_field}"))
-
-        def _param_values(self) -> dict[str, str]:
-            values = {}
-            for widget in self.query_one("#w_params", Vertical).children:
-                if isinstance(widget, Input) and widget.value.strip():
-                    values[widget.placeholder] = widget.value.strip()
-            return values
-
-        @on(Button.Pressed, "#w_create")
-        def _create(self) -> None:
-            name = self.query_one("#w_name", Input).value.strip()
-            if not name:
-                self.query_one("#w_error", Label).update("name is required")
-                return
-            mod_type = str(self.query_one("#w_type", Select).value)
-            argv = ["wizard", mod_type, name]
-            for key, value in self._param_values().items():
-                argv += ["--param", f"{key}={value}"]
-            self.app.run_command(argv, cwd=self.app._proj())  # type: ignore[attr-defined]
-            self.dismiss()
-
-        @on(Button.Pressed, "#w_cancel")
-        def _cancel(self) -> None:
-            self.dismiss()
 
     class S4Commands(Provider):
         """Command palette entries (Ctrl+P)."""
@@ -2469,7 +2395,7 @@ def _make_tui_app(project: str = "."):
                 ("Tune IDs", ["tune-ids", proj]),
                 ("Doctor (environment checks)", ["doctor"]),
                 ("Refresh pipeline table", "refresh"),
-                ("Open wizard form", "wizard"),
+                ("Open guided creation tab", "wizard"),
             ]
 
         async def search(self, query: str):
@@ -2488,7 +2414,7 @@ def _make_tui_app(project: str = "."):
             if action == "refresh":
                 app.refresh_pipeline()  # type: ignore[attr-defined]
             elif action == "wizard":
-                app.push_screen(WizardScreen())  # type: ignore[attr-defined]
+                app.query_one(TabbedContent).active = "tab-create"  # type: ignore[attr-defined]
             else:
                 app.run_command(action)  # type: ignore[attr-defined]
 
@@ -2529,7 +2455,7 @@ def _make_tui_app(project: str = "."):
                     yield Button("Changelog", id="changelog")
                     yield Button("Tune IDs", id="tune-ids")
                     yield Button("Doctor", id="doctor")
-                    yield Button("Wizard", id="open-wizard", variant="warning")
+                    yield Button("Create", id="open-wizard", variant="warning")
                     yield Label("◆ GENERATE")
                     yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="mod_type")
                     yield Input(placeholder="module/object name", id="gen_name")
@@ -2540,6 +2466,18 @@ def _make_tui_app(project: str = "."):
                         with TabPane("Pipeline", id="tab-pipeline"):
                             yield DataTable(id="pipeline")
                             yield Static("", id="phase-detail")
+                        with TabPane("Create", id="tab-create"):
+                            with Vertical(id="create-form"):
+                                yield Label(f"[bold]{_brand_glyph()} Guided mod creation[/]")
+                                yield Label("Mod type")
+                                yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="w_type")
+                                yield Label("Name (required)")
+                                yield Input(placeholder="module/object name", id="w_name")
+                                yield Label("Parameters")
+                                with VerticalScroll(id="w_params_scroll"):
+                                    yield Vertical(id="w_params")
+                                yield Label("", id="w_error")
+                                yield Button("Create", id="w_create", variant="success")
                         with TabPane("Files", id="tab-files"):
                             with Horizontal():
                                 yield Vertical(id="files-container")
@@ -2550,15 +2488,62 @@ def _make_tui_app(project: str = "."):
                             yield RichLog(id="log", markup=True)
             yield Footer()
 
-        def on_mount(self) -> None:
+        async def on_mount(self) -> None:
             self.history = []  # per-instance log mirror (class attr is just the default)
             self.query_one("#pipeline", DataTable).add_columns("Phase", "Status", "Hint")
             self.query_one("#log", RichLog).write(f"[{HERMES['muted']}]Command output appears here.[/]")
             self.refresh_pipeline()
+            await self._w_build_params()
 
         def action_refresh(self) -> None:
             self.refresh_pipeline()
             self._reload_tree()
+
+        _w_built_for: str | None = None
+
+        @on(Select.Changed, "#w_type")
+        async def _w_type_changed(self) -> None:
+            await self._w_build_params()
+
+        async def _w_build_params(self) -> None:
+            """(Re)build guided-creation param inputs for the selected type.
+
+            remove_children() is async in Textual — it must be awaited, otherwise
+            the new Inputs register while the old ones still exist (DuplicateIds).
+            """
+            container = self.query_one("#w_params", Vertical)
+            mod_type = str(self.query_one("#w_type", Select).value)
+            if self._w_built_for == mod_type:
+                return
+            self._w_built_for = mod_type
+            preset = wizard_presets(mod_type)
+            wanted = [(f, preset.get("defaults", {}).get(f, "")) for f in preset.get("params", [])]
+            existing = {w.placeholder: w for w in container.children if isinstance(w, Input)}
+            if list(existing) == [f for f, _ in wanted]:
+                return
+            await container.remove_children()
+            for param_field, default in wanted:
+                await container.mount(Input(value=default, placeholder=param_field, id=f"w_param_{param_field}"))
+
+        def _w_param_values(self) -> dict[str, str]:
+            values = {}
+            for widget in self.query_one("#w_params", Vertical).children:
+                if isinstance(widget, Input) and widget.value.strip():
+                    values[widget.placeholder] = widget.value.strip()
+            return values
+
+        @on(Button.Pressed, "#w_create")
+        def _w_create(self) -> None:
+            name = self.query_one("#w_name", Input).value.strip()
+            if not name:
+                self.query_one("#w_error", Label).update("name is required")
+                return
+            self.query_one("#w_error", Label).update("")
+            mod_type = str(self.query_one("#w_type", Select).value)
+            argv = ["wizard", mod_type, name]
+            for key, value in self._w_param_values().items():
+                argv += ["--param", f"{key}={value}"]
+            self.run_command(argv, cwd=self._proj())
 
         def _proj(self) -> str:
             return self.query_one("#project", Input).value.strip() or "."
@@ -2709,7 +2694,7 @@ def _make_tui_app(project: str = "."):
 
         @on(Button.Pressed, "#open-wizard")
         def _open_wizard(self) -> None:
-            self.push_screen(WizardScreen())
+            self.query_one(TabbedContent).active = "tab-create"
 
         @on(Button.Pressed, "#generate")
         def _generate(self) -> None:

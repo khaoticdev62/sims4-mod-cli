@@ -95,7 +95,7 @@ def test_tui_generate_requires_name(tmp_project):
     _run(go())
 
 
-def test_tui_has_three_tabs(tmp_project):
+def test_tui_has_four_tabs(tmp_project):
     cli = _load_cli()
     from textual.widgets import TabbedContent, TabPane
 
@@ -104,7 +104,7 @@ def test_tui_has_three_tabs(tmp_project):
         async with app.run_test(size=(120, 40)):
             tabs = app.query_one(TabbedContent)
             pane_ids = [pane.id for pane in tabs.query(TabPane)]
-            assert pane_ids == ["tab-pipeline", "tab-files", "tab-log"]
+            assert pane_ids == ["tab-pipeline", "tab-create", "tab-files", "tab-log"]
 
     _run(go())
 
@@ -165,102 +165,101 @@ async def _wait_for(predicate, timeout=5.0):
     return predicate()
 
 
-def test_tui_wizard_modal_type_switch_rebuilds_params(tmp_project):
-    """Regression: switching mod type must not raise DuplicateIds (remove must be awaited)."""
+def test_tui_create_tab_type_switch_rebuilds_params(tmp_project):
+    """Switching mod type must rebuild params without DuplicateIds (remove awaited)."""
     cli = _load_cli()
 
     async def go():
         app = cli._make_tui_app(str(tmp_project))
         async with app.run_test(size=(120, 40)):
             from textual.containers import Vertical
-            from textual.widgets import Button, Select
-            app.query_one("#open-wizard", Button).press()
-            assert await _wait_for(lambda: type(app.screen_stack[-1]).__name__ == "WizardScreen")
-            screen = app.screen_stack[-1]
-            assert await _wait_for(lambda: len(screen.query_one("#w_params", Vertical).children) > 0)
-            screen.query_one("#w_type", Select).value = "career"
+            from textual.widgets import Select
+            assert await _wait_for(lambda: len(app.query_one("#w_params", Vertical).children) > 0)
+            app.query_one("#w_type", Select).value = "career"
             # career preset: label, description, pay, level_title
             assert await _wait_for(
-                lambda: len([w for w in screen.query_one("#w_params", Vertical).children
+                lambda: len([w for w in app.query_one("#w_params", Vertical).children
                              if type(w).__name__ == "Input"]) == 4
             )
-            # switch back: also clean
-            screen.query_one("#w_type", Select).value = "trait"
+            app.query_one("#w_type", Select).value = "trait"
             assert await _wait_for(
-                lambda: len([w for w in screen.query_one("#w_params", Vertical).children
+                lambda: len([w for w in app.query_one("#w_params", Vertical).children
                              if type(w).__name__ == "Input"]) == 2
             )
 
     _run(go())
 
 
-def test_tui_wizard_modal_buttons_visible_on_small_screen(tmp_project):
-    """Regression: on a short console the modal clipped everything below the type
-    select (no name input, no Create/Cancel). Actions must stay on-screen."""
+def test_tui_create_tab_all_fields_visible_on_small_screen(tmp_project):
+    """The Create tab must keep every interactive element on-screen at 22 rows."""
     cli = _load_cli()
 
     async def go():
         app = cli._make_tui_app(str(tmp_project))
         async with app.run_test(size=(100, 22)):
-            from textual.widgets import Button, Select
-            app.query_one("#open-wizard", Button).press()
-            assert await _wait_for(lambda: type(app.screen_stack[-1]).__name__ == "WizardScreen")
-            screen = app.screen_stack[-1]
-            assert await _wait_for(lambda: bool(screen.query("#w_create")))
-            screen.query_one("#w_type", Select).value = "career"  # 4 params = worst case
+            from textual.widgets import Select
+            assert await _wait_for(lambda: bool(app.query("#w_create")))
+            app.query_one("#w_type", Select).value = "career"  # 4 params = worst case
             assert await _wait_for(
-                lambda: len([w for w in screen.query_one("#w_params").children
+                lambda: len([w for w in app.query_one("#w_params").children
                              if type(w).__name__ == "Input"]) == 4
             )
-            for wid in ("w_name", "w_create", "w_cancel", "w_error"):
-                region = screen.query_one(f"#{wid}").region
+            for wid in ("w_type", "w_name", "w_create", "w_error", "w_params_scroll"):
+                region = app.query_one(f"#{wid}").region
                 assert region.y < 22, f"#{wid} off-screen at y={region.y}"
 
     _run(go())
 
 
-def test_tui_wizard_modal_creates_artifact(tmp_project, tmp_path):
+def test_tui_create_tab_creates_artifact(tmp_project, tmp_path):
     cli = _load_cli()
     import os
 
     old_cwd = os.getcwd()
-    os.chdir(tmp_path)  # cwd is NOT the TUI project; the modal must still target it
+    os.chdir(tmp_path)  # cwd is NOT the TUI project; the form must still target it
     try:
         async def go():
             app = cli._make_tui_app(str(tmp_project))
             async with app.run_test(size=(120, 40)) as pilot:
                 from textual.widgets import Button, Input
-                app.query_one("#open-wizard", Button).press()
-                assert await _wait_for(lambda: type(app.screen_stack[-1]).__name__ == "WizardScreen")
-                screen = app.screen_stack[-1]
-                assert await _wait_for(lambda: bool(screen.query("#w_name")))
-                screen.query_one("#w_name", Input).value = "ModalTrait"
-                screen.query_one("#w_create", Button).press()
+                assert await _wait_for(lambda: bool(app.query("#w_name")))
+                app.query_one("#w_name", Input).value = "TabTrait"
+                app.query_one("#w_create", Button).press()
                 await pilot.pause()
                 await app.workers.wait_for_complete()
 
         _run(go())
     finally:
         os.chdir(old_cwd)
-    assert (tmp_project / "src" / "xml_snippets" / "ModalTrait_trait" / "ModalTrait_trait.xml").exists()
+    assert (tmp_project / "src" / "xml_snippets" / "TabTrait_trait" / "TabTrait_trait.xml").exists()
     # and must NOT leak a new project into the wrong cwd
-    assert not (tmp_path / "ModalTrait").exists()
-    assert (tmp_project / "src" / "xml_snippets" / "ModalTrait_trait" / "ModalTrait_trait.xml").exists()
+    assert not (tmp_path / "TabTrait").exists()
 
 
-def test_tui_wizard_modal_requires_name(tmp_project):
+def test_tui_create_tab_requires_name(tmp_project):
     cli = _load_cli()
 
     async def go():
         app = cli._make_tui_app(str(tmp_project))
         async with app.run_test(size=(120, 40)):
             from textual.widgets import Button, Label
+            assert await _wait_for(lambda: bool(app.query("#w_create")))
+            app.query_one("#w_create", Button).press()
+            assert await _wait_for(lambda: "name is required" in str(app.query_one("#w_error", Label).content))
+
+    _run(go())
+
+
+def test_tui_create_tab_button_opens_tab(tmp_project):
+    cli = _load_cli()
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(120, 40)):
+            from textual.widgets import Button, TabbedContent
             app.query_one("#open-wizard", Button).press()
-            assert await _wait_for(lambda: type(app.screen_stack[-1]).__name__ == "WizardScreen")
-            screen = app.screen_stack[-1]
-            assert await _wait_for(lambda: bool(screen.query("#w_create")))
-            screen.query_one("#w_create", Button).press()
-            assert await _wait_for(lambda: "name is required" in str(screen.query_one("#w_error", Label).content))
+            await _wait_for(lambda: app.query_one(TabbedContent).active == "tab-create")
+            assert app.query_one(TabbedContent).active == "tab-create"
 
     _run(go())
 
