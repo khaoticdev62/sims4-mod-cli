@@ -7,3 +7,7 @@ sims4_mod_cli.egg-info
 *.spec
 *.zip
 *.exe
+
+# agent session scratch
+.s4phase_*
+*.s4prompt.txt
