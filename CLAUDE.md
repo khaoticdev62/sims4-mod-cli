@@ -6,9 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 S4Chemist (package name `s4chemist`, CLI entry point `s4chemist_cli`) is a portable, single-file
 Python CLI for scaffolding, validating, and packaging Sims 4 mod projects. The entire implementation
-lives in one module: `s4chemist_cli.py` (~2200 lines). There is no framework, no external
-dependencies (`dependencies = []` in `pyproject.toml`), and no test suite — treat behavioral changes
-carefully since there's no automated safety net.
+lives in one module: `s4chemist_cli.py` (~2300 lines). The only runtime dependency is `rich`
+(for the terminal UI). Tests live in `tests/` (pytest).
 
 ## Commands
 
@@ -104,14 +103,18 @@ using the same `_status_panel` UI helpers as every other command.
   folder, Mods folder, game's bundled Python) with no side effects.
 
 ### Output styling
-All commands render through shared helpers — `_status_panel`, `_meta_block`, `_kv_block`, `_section`,
-`_status_label`, `_header` — that build the "Hermes-style" colored terminal panels (ANSI codes are
-inline, e.g. `\033[1;32mOK\033[0m`). Reuse these helpers for new commands rather than hand-rolling
-new print formatting, to keep output visually consistent.
+The UI is built on `rich` (the only runtime dependency). All commands render through shared
+helpers — `_status_panel` (auto-sized closed panel; body items may be markup strings or Rich
+renderables like `Table`), `_meta_block`, `_kv_block`, `_section` — styled by the `THEME`
+tags (`ok`/`fail`/`verified`/`local`/`blocked`/`accent`/`head`/`hint`/`glyph`). Rules:
+never inline raw ANSI (`\033[...]`); always escape user-derived strings with `_esc()` so they
+can't corrupt markup. Color is auto-disabled when piped, with `NO_COLOR`, or `--no-color`;
+`_ascii_mode()` (legacy console, non-UTF-8 stream, or `S4_ASCII=1`) switches box glyphs and the
+`❯` prompt glyph to ASCII.
 
 ## Distribution
 
-`s4chemist_cli.spec` (PyInstaller) builds a single portable `.exe` from `s4chemist_cli.py` with no
-extra data files — the CLI must remain self-contained (no runtime file reads outside the target
-project directory) since packaging bundles only the script itself. See `docs/packaging.md` for the
+`s4chemist_cli.spec` (PyInstaller) builds a single portable `.exe` from `s4chemist_cli.py`
+(bundling `rich`) with no extra data files — the CLI must remain self-contained (no runtime file
+reads outside the target project directory). See `docs/packaging.md` for the
 release zip layout and `docs/sims4-mod-types.md` for the mod-type reference shipped to end users.

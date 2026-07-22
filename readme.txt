@@ -1,7 +1,7 @@
 Portable Sims 4 Mod Construction CLI — Hermes-Style Layout
 
 Files:
-- s4chemist_cli.py : portable Hermes-style CLI
+- s4chemist_cli.py : portable Hermes-style CLI (requires `rich` for source runs)
 
 Common commands:
 - python s4chemist_cli.py --help

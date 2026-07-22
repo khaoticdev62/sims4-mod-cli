@@ -16,13 +16,22 @@ from pathlib import Path
 from datetime import datetime
 from typing import Callable, Iterable
 
+from rich import box
+from rich.console import Console, Group
+from rich.markup import escape as _escape_markup
+from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
+from rich.table import Table
+from rich.text import Text
+from rich.theme import Theme
+
 if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     try:
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 PIPELINE_PHASES = [
     "concept",
@@ -169,24 +178,38 @@ def next_actions(state: dict) -> list[str]:
     return [a for a in actions if a]
 
 
-def print_pipeline_status(proj: Path) -> str:
-    state = load_pipeline_state(proj)
-    cur, done, total, pct = phase_progress(state)
-    rows = [f"{'Phase':20} {'Status':10} {'Hint'}"]
-    rows.append("─" * 60)
+def _progress_bar(pct: int, width: int = 10) -> str:
+    filled = round(width * pct / 100)
+    if _ascii_mode():
+        return "#" * filled + "-" * (width - filled)
+    return "█" * filled + "░" * (width - filled)
+
+
+def _pipeline_table(state: dict) -> Table:
+    cur = current_phase(state)
+    table = Table(box=_inner_table_box(), show_edge=False, header_style="head", pad_edge=False)
+    table.add_column("Phase")
+    table.add_column("Status")
+    table.add_column("Hint")
     for p in PIPELINE_PHASES:
         locked = is_phase_locked(state, p)
         active = p == cur and not locked
         marker = "DONE" if locked else ("ACTIVE" if active else "WAIT")
-        color = C_GREEN if locked else C_YELLOW if active else C_RESET
-        label = PIPELINE_META[p]["name"]
-        hint = PIPELINE_META[p]["hint"]
-        rows.append(f"{C_BOLD_WHITE}{label:20}{C_RESET} {color}{marker:10}{C_RESET} {hint}")
+        style = "ok" if locked else ("local" if active else "")
+        styled_marker = f"[{style}]{marker}[/{style}]" if style else marker
+        table.add_row(f"[head]{PIPELINE_META[p]['name']}[/]", styled_marker, PIPELINE_META[p]["hint"])
+    return table
+
+
+def print_pipeline_status(proj: Path) -> str:
+    state = load_pipeline_state(proj)
+    cur, done, total, pct = phase_progress(state)
+    rows: list = [_pipeline_table(state)]
     rows += [
         "",
-        f"{C_BOLD_WHITE}Progress:{C_RESET} {done}/{total} ({pct}%)",
-        f"{C_BOLD_WHITE}Next:{C_RESET}",
-    ] + [f"  - {a}" for a in next_actions(state)]
+        f"[head]Progress:[/] {done}/{total} ({pct}%) [ok]{_progress_bar(pct)}[/]",
+        "[head]Next:[/]",
+    ] + [f"  - {_esc(a)}" for a in next_actions(state)]
     return _status_panel("pipeline", rows, command="pipeline")
 
 
@@ -194,15 +217,15 @@ def print_pipeline_next(proj: Path) -> str:
     state = load_pipeline_state(proj)
     cur = current_phase(state)
     actions = next_actions(state)
-    rows = [f"{C_BOLD_WHITE}Current Phase:{C_RESET} {PIPELINE_META[cur]['name']}"]
+    rows = [f"[head]Current Phase:[/] {_esc(PIPELINE_META[cur]['name'])}"]
     rows += [
         "",
-        f"{C_BOLD_WHITE}Next Actions:{C_RESET}",
-    ] + [f"  - {a}" for a in actions]
+        "[head]Next Actions:[/]",
+    ] + [f"  - {_esc(a)}" for a in actions]
     rows += [
         "",
-        f"{C_BOLD_WHITE}Unlock:{C_RESET} pipeline unlock .",
-        f"{C_BOLD_WHITE}Reset:{C_RESET} pipeline reset .",
+        "[head]Unlock:[/] pipeline unlock .",
+        "[head]Reset:[/] pipeline reset .",
     ]
     return _status_panel("pipeline-next", rows, command="pipeline-next")
 
@@ -221,7 +244,7 @@ def unlock_current_phase(proj: Path) -> str:
     else:
         msg = f"{PIPELINE_META[cur]['name']} -> {PIPELINE_META[nxt]['name']}"
     rows = _meta_block("verified", "Unlocked", msg)
-    rows += [f"{C_BOLD_WHITE}Progress:{C_RESET} {phase_progress(state)[1]}/{len(PIPELINE_PHASES)}"]
+    rows += [f"[head]Progress:[/] {phase_progress(state)[1]}/{len(PIPELINE_PHASES)}"]
     return _status_panel("pipeline-unlock", rows, command="pipeline-unlock")
 
 
@@ -261,23 +284,64 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _header(text: str) -> str:
-    return f"\033[1;37m{text}\033[0m"
+# ── UI layer (rich-powered Hermes style) ─────────────────────────────────
+
+THEME = Theme(
+    {
+        "ok": "bold green",
+        "fail": "bold red",
+        "verified": "green",
+        "local": "yellow",
+        "blocked": "bold red",
+        "accent": "blue",
+        "head": "bold white",
+        "hint": "yellow",
+        "glyph": "bold green",
+    }
+)
+
+NO_COLOR = "NO_COLOR" in os.environ or "--no-color" in sys.argv[1:]
 
 
-PROMPT_GLYPH = "\033[1;32m❯\033[0m"
+def _make_console() -> Console:
+    # Rich auto-disables color when stdout is not a terminal and enables VT
+    # processing on modern Windows consoles; NO_COLOR/--no-color force plain.
+    return Console(theme=THEME, highlight=False, emoji=False, no_color=NO_COLOR)
+
+
+_console = _make_console()
+
+
+def _ascii_mode() -> bool:
+    """Force ASCII glyphs on legacy consoles, non-UTF-8 streams, or S4_ASCII=1."""
+    if os.environ.get("S4_ASCII"):
+        return True
+    if _console.is_terminal and _console.legacy_windows:
+        return True
+    encoding = (sys.stdout.encoding or "").lower()
+    return "utf" not in encoding
+
+
+def _box_style() -> box.Box:
+    return box.ASCII if _ascii_mode() else box.ROUNDED
+
+
+def _inner_table_box() -> box.Box | None:
+    """Tables nested inside panels: header rule only, no outer edge."""
+    return box.SIMPLE_HEAD if not _ascii_mode() else box.ASCII
+
+
+def _glyph() -> str:
+    return ">" if _ascii_mode() else "❯"
 
 
 def _prompt() -> str:
-    return f"{PROMPT_GLYPH} "
+    return f"[glyph]{_glyph()}[/] "
 
 
-C_RESET = "\033[0m"
-C_BOLD_WHITE = "\033[1;37m"
-C_GREEN = "\033[1;32m"
-C_RED = "\033[1;31m"
-C_YELLOW = "\033[1;33m"
-C_BLUE = "\033[1;34m"
+def _esc(text: object) -> str:
+    """Escape user-derived content so it cannot corrupt Rich markup."""
+    return _escape_markup(str(text))
 
 
 def _fnv1a_64(text: str) -> int:
@@ -314,52 +378,63 @@ def _rewrite_stbl_placeholders(stem: str, text: str) -> tuple[str, str]:
     return updated, "\n".join(mappings)
 
 
-def _status_label(ok: bool, text: str) -> str:
-    return f"{C_GREEN}[OK]{C_RESET} {text}" if ok else f"{C_RED}[FAIL]{C_RESET} {text}"
+_META_TAGS = {
+    "ok": "[OK]",
+    "verified": "[VERIFIED]",
+    "local": "[LOCAL]",
+    "blocked": "[BLOCKED]",
+    "fail": "[FAIL]",
+}
 
 
-def _status_panel(headline: str, body: Iterable[str], *, command: str = "") -> str:
-    headline_text = headline.replace("accessibility_verdict: true", "VERDICT").replace("game-python", "GAME PYTHON")
-    headline_display = f"{C_BLUE}{headline_text}{C_RESET}"
-    rule = "─" * 20
-    footer_command = command or headline_text.lower()
-    lines = [
-        f"{C_BOLD_WHITE}┌── {C_GREEN}s4chemist_cli {C_BOLD_WHITE}── {headline_display} {C_BOLD_WHITE}{rule}┐{C_RESET}"
-    ]
-    for line in body:
-        lines.append(f"{C_BOLD_WHITE}│{C_RESET} {line}")
-    lines.append(f"{C_BOLD_WHITE}└{'─' * 58}┘{C_RESET}")
-    lines.append(f"{C_YELLOW}{PROMPT_GLYPH}{C_RESET} {C_BOLD_WHITE}s4chemist_cli {footer_command} ...{C_RESET}")
-    if footer_command != "s4chemist_cli":
-        lines.append(f"{C_YELLOW}{PROMPT_GLYPH}{C_RESET} {C_BOLD_WHITE}Run 's4chemist_cli doctor'   Verify environment paths.{C_RESET}")
-        lines.append(f"{C_YELLOW}{PROMPT_GLYPH}{C_RESET} {C_BOLD_WHITE}Run 's4chemist_cli help <cmd>'  Show command help.{C_RESET}")
-    else:
-        lines.append(f"{C_YELLOW}{PROMPT_GLYPH}{C_RESET} {C_BOLD_WHITE}Enter a command to start.{C_RESET}")
-    return "\n".join(lines)
+def _status_panel(headline: str, body: Iterable, *, command: str = "") -> str:
+    """Render the Hermes-style panel (auto-sized, closed box).
+
+    Body items may be Rich-markup strings or Rich renderables (e.g. Table).
+    User-derived strings must be escaped with `_esc()` (already handled by
+    `_meta_block`/`_kv_block`).
+    """
+    footer_command = command or headline.lower()
+    items = [Text.from_markup(item) if isinstance(item, str) else item for item in body]
+    panel = Panel(
+        Group(*items),
+        title=f"[ok]s4chemist_cli[/] [head]{'-' if _ascii_mode() else '─'}[/] [accent]{_esc(headline)}[/]",
+        title_align="left",
+        box=_box_style(),
+        border_style="head",
+        expand=False,
+    )
+    with _console.capture() as cap:
+        _console.print(panel)
+        _console.print(f"[glyph]{_glyph()}[/] [head]s4chemist_cli {_esc(footer_command)} ...[/]")
+        if footer_command != "s4chemist_cli":
+            _console.print(f"[glyph]{_glyph()}[/] Run [hint]'s4chemist_cli doctor'[/]   Verify environment paths.")
+            _console.print(f"[glyph]{_glyph()}[/] Run [hint]'s4chemist_cli help <cmd>'[/]  Show command help.")
+        else:
+            _console.print(f"[glyph]{_glyph()}[/] [head]Enter a command to start.[/]")
+    return cap.get().rstrip("\n")
 
 
 def _kv_block(rows: list[tuple[str, str]]) -> list[str]:
-    return [f"{k}: {v}" for k, v in rows]
+    """Key/value rows with aligned columns; empty keys become continuation lines."""
+    width = max((len(k) for k, _ in rows), default=0)
+    out = []
+    for k, v in rows:
+        out.append(f"{k + ':':<{width + 1}} {v}" if k else f"{'':<{width + 1}} {v}")
+    return out
 
 
 def _meta_block(state: str, label: str, detail: str = "") -> list[str]:
-    mapping = {
-        "ok": f"{C_GREEN}[OK]{C_RESET}",
-        "verified": f"{C_GREEN}[VERIFIED]{C_RESET}",
-        "local": f"{C_YELLOW}[LOCAL]{C_RESET}",
-        "blocked": f"{C_RED}[BLOCKED]{C_RESET}",
-        "fail": f"{C_RED}[FAIL]{C_RESET}",
-    }
-    tag = mapping.get(state, f"{C_YELLOW}[{state.upper()}]{C_RESET}")
-    return [f"{tag} {label}{' — ' + detail if detail else ''}"]
+    style = state if state in _META_TAGS else "local"
+    tag = f"[{style}]{_esc(_META_TAGS.get(state, '[' + state.upper() + ']'))}[/{style}]"
+    line = f"{tag} {_esc(label)}"
+    if detail:
+        line += f" — {_esc(detail)}"
+    return [line]
 
 
-def _section(title: str, lines: list[str]) -> list[str]:
-    out = [f"\033[1;37m{title}\033[0m"]
-    if lines:
-        for line in lines:
-            out.append(line)
-    return out
+def _section(title: str, lines: list) -> list:
+    return [f"[head]{title}[/]", *lines]
 
 
 def init_project(name: str) -> Path:
@@ -968,16 +1043,21 @@ TUNING_TAG_RULES = {
 }
 
 
-def wizard_ask(prompt: str, default: str = "") -> str:
-    try:
-        prompt_text = f"{PROMPT_GLYPH} {prompt}"
-        if default:
-            prompt_text += f" [{default}]"
-        print(prompt_text, end=": ", flush=True)
-        reply = sys.stdin.readline().strip()
-    except EOFError:
-        return default
-    return reply or default
+def wizard_ask(prompt: str, default: str = "", *, required: bool = False, attempts: int = 3) -> str:
+    """Interactive prompt via rich; `required` re-asks (up to `attempts`) on empty input."""
+    for _ in range(attempts):
+        try:
+            reply = (Prompt.ask(
+                f"[glyph]{_glyph()}[/] {prompt}",
+                default=default or None,
+                console=_console,
+            ) or "").strip()
+        except EOFError:
+            return default
+        if reply or not required:
+            return reply or default
+        _console.print("[fail]A value is required.[/]")
+    return default
 
 
 def new_career(proj: Path, name: str) -> Path:
@@ -1618,7 +1698,6 @@ def install_to_mods(proj: Path, mods_dir: str | None = None) -> Path:
         d = target / extra
         if d.exists():
             shutil.rmtree(d)
-    print(f"Installed project copy into: {target}")
     return target
 
 
@@ -1627,21 +1706,21 @@ def doctor_check() -> int:
     checks = []
     if sys.version_info < (3, 10):
         issues += 1
-        checks.append(("Python", "\033[1;31mFAIL\033[0m Python 3.10+"))
+        checks.append(("Python", "[fail]FAIL[/] Python 3.10+"))
     else:
-        checks.append(("Python", "\033[1;32mOK\033[0m Python >= 3.10"))
+        checks.append(("Python", "[ok]OK[/] Python >= 3.10"))
 
     sims_docs = Path.home() / "Documents" / "Electronic Arts" / "The Sims 4"
     sims_ok = sims_docs.exists()
-    sims_ok_text = "\033[1;32mOK\033[0m" if sims_ok else "\033[1;31mMISSING\033[0m"
+    sims_ok_text = "[ok]OK[/]" if sims_ok else "[fail]MISSING[/]"
     checks.append(("Sims Docs", f"{sims_ok_text} Sims 4 Documents"))
 
     if sims_ok:
         mods = sims_docs / "Mods"
-        mods_text = "\033[1;32mOK\033[0m" if mods.exists() else "\033[1;33mMISSING\033[0m"
-        checks.append(("Mods Folder", f"{mods_text} {mods}"))
+        mods_text = "[ok]OK[/]" if mods.exists() else "[local]MISSING[/]"
+        checks.append(("Mods Folder", f"{mods_text} {_esc(mods)}"))
 
-    print(_status_panel("accessibility_verdict: true", _kv_block(checks), command="doctor"))
+    print(_status_panel("VERDICT", _kv_block(checks), command="doctor"))
     return issues
 
 
@@ -1660,40 +1739,59 @@ def ensure_game_python() -> None:
 
     rows = []
     if found:
-        rows.append(("Game Python", "\033[1;32mOK\033[0m detected"))
+        rows.append(("Game Python", "[ok]OK[/] detected"))
         for item in found[:8]:
-            rows.append(("", item))
+            rows.append(("", _esc(item)))
     else:
-        rows.append(("Game Python", "\033[1;31mMISSING\033[0m"))
+        rows.append(("Game Python", "[fail]MISSING[/]"))
         rows.append(("Hint", "<GAME>/Python/ + base/core/simulation/generated zip"))
 
-    print(_status_panel("game-python", _kv_block(rows), command="game-python"))
+    print(_status_panel("GAME PYTHON", _kv_block(rows), command="game-python"))
+
+
+def _help_footer() -> list[str]:
+    return [
+        f"  [glyph]{_glyph()}[/] s4chemist_cli <command>    Enter a command to start.",
+        "  Run 's4chemist_cli doctor'   Verify environment paths.",
+        "  Run 's4chemist_cli help <cmd>'  Show command help.",
+    ]
+
+
+def _commands_table() -> Table:
+    table = Table(box=_inner_table_box(), show_edge=False, header_style="head", pad_edge=False)
+    table.add_column("COMMAND")
+    table.add_column("DESCRIPTION")
+    table.add_column("STATUS")
+    for entry in COMMANDS.values():
+        if not entry.description:
+            continue  # hidden command: dispatchable but not listed
+        status_tag = ""
+        if entry.status:
+            status_tag = f"[{entry.status}]{_esc(_META_TAGS.get(entry.status, entry.status.upper()))}[/{entry.status}]"
+        table.add_row(f"[head]{_esc(entry.usage)}[/]", _esc(entry.description), status_tag)
+    return table
 
 
 def print_help(*, is_subcommand=False, command="", error="") -> None:
-    panel = []
+    panel: list = []
     panel.extend(_section("PORTABLE SIMS 4 MOD CONSTRUCTION CLI", []))
     if error:
-        panel.extend(_section("\033[1;31mERROR\033[0m", [error]))
+        panel.extend(_section("[fail]ERROR[/]", [_esc(error)]))
 
     if is_subcommand:
-        panel.extend(_section(f"COMMAND \033[1;37m{command}\033[0m", []))
-        panel.extend(_section("USAGE", [f"  {_prompt()}s4chemist_cli {command} [options]"]))
+        panel.extend(_section(f"COMMAND [head]{_esc(command)}[/]", []))
+        panel.extend(_section("USAGE", [f"  {_prompt()}s4chemist_cli {_esc(command)} \\[options]"]))
         entry = COMMANDS.get(command)
         if entry and entry.args:
-            panel.extend(_section("ARGS", entry.args))
-        panel.extend(_section("NOTES", ["  Status: \033[1;32mVERIFIED\033[0m = exercised end-to-end; \033[1;33mLOCAL PATH REQUIRED\033[0m = needs environment-specific value."]))
-        panel.extend(_section("FOOTER", ["  \033[1;32m❯\033[0m s4chemist_cli <command>    Enter a command to start.", "  Run 's4chemist_cli doctor'   Verify environment paths.", "  Run 's4chemist_cli help <cmd>'  Show command help."]))
+            panel.extend(_section("ARGS", [_esc(a) for a in entry.args]))
+        panel.extend(_section("NOTES", ["  Status: [verified]VERIFIED[/] = exercised end-to-end; [local]LOCAL PATH REQUIRED[/] = needs environment-specific value."]))
+        panel.extend(_section("FOOTER", _help_footer()))
     else:
-        command_lines = [
-            "  \033[1;37mCOMMAND\033[0m          \033[1;37mDESCRIPTION / STATUS\033[0m",
-            "  \033[1;37m-------\033[0m          \033[1;37m-------------------\033[0m",
-        ]
-        for entry in COMMANDS.values():
-            command_lines.extend(entry.help_lines)
-        panel.extend(_section("COMMANDS", command_lines))
-        panel.extend(_section("STATUS KEY", ["  \033[1;32m[VERIFIED]\033[0m   = exercised end-to-end", "  \033[1;33m[LOCAL]\033[0m     = needs environment-specific value", "  \033[1;31m[BLOCKED]\033[0m   = missing dependency / environment"]))
-        panel.extend(_section("FOOTER", ["  \033[1;32m❯\033[0m s4chemist_cli <command>    Enter a command to start.", "  Run 's4chemist_cli doctor'   Verify environment paths.", "  Run 's4chemist_cli help <cmd>'  Show command help."]))
+        panel.extend(_section("COMMANDS", [_commands_table()]))
+        kinds = " | ".join(MOD_FACTORIES)
+        panel.extend(_section("KINDS", [f"  {kinds}"]))
+        panel.extend(_section("STATUS KEY", ["  [verified]\\[VERIFIED][/]   = exercised end-to-end", "  [local]\\[LOCAL][/]     = needs environment-specific value", "  [blocked]\\[BLOCKED][/]   = missing dependency / environment"]))
+        panel.extend(_section("FOOTER", _help_footer()))
 
     print(_status_panel(f"{'help' if is_subcommand else 's4chemist_cli'}", panel, command=command if is_subcommand else ""))
 
@@ -1712,8 +1810,10 @@ class Command:
 
     name: str
     handler: Callable[[list[str]], int]
-    args: list[str] = field(default_factory=list)       # ARGS lines for subcommand help
-    help_lines: list[str] = field(default_factory=list)  # rows in the main COMMANDS panel
+    args: list[str] = field(default_factory=list)  # ARGS lines for subcommand help
+    usage: str = ""        # usage column in the main COMMANDS table
+    description: str = ""  # description column (empty = hidden from main help)
+    status: str = ""       # "verified" | "local" | "" -> STATUS column tag
 
 
 def _cmd_init(argv: list[str]) -> int:
@@ -1761,7 +1861,7 @@ def _cmd_validate(argv: list[str]) -> int:
     state = "ok" if issues == 0 else "fail"
     rows = _meta_block(state, "Validation", f"{issues} issue{'s' if issues != 1 else ''}")
     if found:
-        rows += ["", f"{C_BOLD_WHITE}Issues:{C_RESET}"] + [f"  - {item}" for item in found[:15]]
+        rows += ["", "[head]Issues:[/]"] + [f"  - {_esc(item)}" for item in found[:15]]
         if issues > 15:
             rows.append(f"  ... and {issues - 15} more")
         if not strict:
@@ -1840,7 +1940,7 @@ def _cmd_pipeline(argv: list[str]) -> int:
         proj = _existing_project(path)
         meta = PIPELINE_META.get(phase, {})
         rows = _meta_block("ok", f"Tune: {meta.get('name', phase)}", meta.get("hint", ""))
-        rows += ["", f"{C_BOLD_WHITE}Example:{C_RESET}", f"  - {meta.get('next', '')}", f"{C_BOLD_WHITE}Artifact:{C_RESET} {meta.get('artifact', '')}"]
+        rows += ["", "[head]Example:[/]", f"  - {_esc(meta.get('next', ''))}", f"[head]Artifact:[/] {_esc(meta.get('artifact', ''))}"]
         print(_status_panel("pipeline-tune", rows, command="pipeline tune"))
         return 0
     path = argv[1] if len(argv) > 1 else "."
@@ -1904,16 +2004,16 @@ def _cmd_generate(argv: list[str]) -> int:
         save_pipeline_state(proj, state)
     panel = [
         _meta_block("verified", "Generated", f"{mod_type}: {name}")[0],
-        f"Path: {d}",
+        f"Path: {_esc(d)}",
         "",
-        f"{C_BOLD_WHITE}Brain Advice:{C_RESET}",
+        "[head]Brain Advice:[/]",
         f"  {advice}",
         "",
-        f"{C_BOLD_WHITE}Dependencies:{C_RESET}",
-    ] + [f"  - {item}" for item in deps] + [
+        "[head]Dependencies:[/]",
+    ] + [f"  - {_esc(item)}" for item in deps] + [
         "",
-        f"{C_BOLD_WHITE}Next Steps:{C_RESET}",
-    ] + [f"  - {item}" for item in preset.get("next_steps", [])]
+        "[head]Next Steps:[/]",
+    ] + [f"  - {_esc(item)}" for item in preset.get("next_steps", [])]
     _advance_pipeline_if_artifact(proj, f"src/{mod_type}")
     _advance_pipeline_if_artifact(proj, "src/xml_snippets")
     _advance_pipeline_if_artifact(proj, "src/ts4script")
@@ -1921,8 +2021,8 @@ def _cmd_generate(argv: list[str]) -> int:
     if note_kv:
         panel += [
             "",
-            f"{C_BOLD_WHITE}Pipeline Notes Saved:{C_RESET}",
-        ] + [f"  {k}: {v}" for k, v in note_kv.items()]
+            "[head]Pipeline Notes Saved:[/]",
+        ] + [f"  {_esc(k)}: {_esc(v)}" for k, v in note_kv.items()]
     print(_status_panel("generate", panel, command="generate"))
     return 0
 
@@ -2029,7 +2129,7 @@ def _cmd_tune_ids(argv: list[str]) -> int:
             touched.append(str((loc_dir / f"stbl_{xml.stem}.txt").relative_to(proj)))
     rows = _meta_block("verified", "Tuned IDs", f"{len(touched)} file(s)")
     if touched:
-        rows += ["", "Updated:"] + [f"  - {item}" for item in sorted(set(touched))[:20]]
+        rows += ["", "[head]Updated:[/]"] + [f"  - {_esc(item)}" for item in sorted(set(touched))[:20]]
     print(_status_panel("tune-ids", rows, command="tune-ids"))
     _advance_pipeline_if_artifact(proj, "tmp/tune_ids_report.txt")
     return 0
@@ -2058,7 +2158,7 @@ def _cmd_wizard(argv: list[str]) -> int:
         if not interactive:
             print(_status_panel("wizard", [_meta_block("fail", "Cancelled", "name is required (pass [name] or --param name=... non-interactively)")[0]], command="wizard"))
             return 2
-        name = wizard_ask("Module/object name", "")
+        name = wizard_ask("Module/object name", required=True)
         if not name:
             print(_status_panel("wizard", [_meta_block("fail", "Cancelled", "name is required")[0]], command="wizard"))
             return 2
@@ -2083,6 +2183,19 @@ def _cmd_wizard(argv: list[str]) -> int:
     for key, value in cli_params.items():
         params.setdefault(key, value)
 
+    if interactive:
+        summary = Table(box=_box_style(), header_style="head", pad_edge=False)
+        summary.add_column("Field")
+        summary.add_column("Value")
+        summary.add_row("mod_type", _esc(mod_type))
+        summary.add_row("name", _esc(name))
+        for k, v in params.items():
+            summary.add_row(_esc(k), _esc(v))
+        _console.print(summary)
+        if not Confirm.ask("Create files?", console=_console, default=True):
+            print(_status_panel("wizard", [_meta_block("fail", "Cancelled", "nothing written")[0]], command="wizard"))
+            return 2
+
     factory = MOD_FACTORIES.get(mod_type)
     if factory is None:
         print(_status_panel("wizard", [_meta_block("fail", "Unknown mod type", mod_type)[0]], command="wizard"))
@@ -2099,16 +2212,16 @@ def _cmd_wizard(argv: list[str]) -> int:
     deps = dependency_notes(mod_type)
     panel = [
         _meta_block("verified", "Wizard Complete", f"{mod_type}: {name}")[0],
-        f"Path: {d}",
+        f"Path: {_esc(d)}",
         "",
-        f"{C_BOLD_WHITE}Brain Advice:{C_RESET}",
+        "[head]Brain Advice:[/]",
         f"  {advice}",
         "",
-        f"{C_BOLD_WHITE}Dependencies:{C_RESET}",
-    ] + [f"  - {item}" for item in deps] + [
+        "[head]Dependencies:[/]",
+    ] + [f"  - {_esc(item)}" for item in deps] + [
         "",
-        f"{C_BOLD_WHITE}Next Steps:{C_RESET}",
-    ] + [f"  - {item}" for item in preset.get("next_steps", [])]
+        "[head]Next Steps:[/]",
+    ] + [f"  - {_esc(item)}" for item in preset.get("next_steps", [])]
     print(_status_panel("wizard", panel, command="wizard"))
     _advance_pipeline_if_artifact(proj, f"src/{mod_type}")
     _advance_pipeline_if_artifact(proj, "CHANGELOG.md")
@@ -2122,7 +2235,9 @@ COMMANDS: dict[str, Command] = {
             "init",
             _cmd_init,
             args=["  name       Project directory / mod name"],
-            help_lines=["  init <name>           Initialize a new mod project.                            \033[1;32m[VERIFIED]\033[0m"],
+            usage="init <name>",
+            description="Initialize a new mod project.",
+            status="verified",
         ),
         Command(
             "new",
@@ -2132,28 +2247,33 @@ COMMANDS: dict[str, Command] = {
                 "  kind       xml_snippet|ts4script|package|career|trait|buff|interaction|event|achievement|aspiration|whim|club|holiday|loot_action|testset|relationship|skill|motive",
                 "  name       Artifact/module name",
             ],
-            help_lines=[
-                "  new <where> <kind>    Create xml_snippet, ts4script, package, career, trait, buff, interaction, event, or achievement artifact.      \033[1;32m[VERIFIED]\033[0m",
-                "                       <kind>: xml_snippet | ts4script | package | career | trait | buff | interaction | event | achievement | aspiration | whim | club | holiday | loot_action | testset | relationship | skill | motive",
-            ],
+            usage="new <where> <kind> <name>",
+            description="Create a mod artifact of any supported kind.",
+            status="verified",
         ),
         Command(
             "validate",
             _cmd_validate,
             args=["  path       Project path, default '.'.", "  --strict   Treat template values as errors."],
-            help_lines=["  validate [path]       Validate XML/packaging hygiene.                         \033[1;32m[VERIFIED]\033[0m"],
+            usage="validate [path]",
+            description="Validate XML/packaging hygiene.",
+            status="verified",
         ),
         Command(
             "build",
             _cmd_build,
             args=["  path       Project path, default '.'.", "  --release  Use release packaging semantics (same output as 'package')."],
-            help_lines=["  build [path]          Package current artifacts into a release zip.           \033[1;32m[VERIFIED]\033[0m"],
+            usage="build [path]",
+            description="Package current artifacts into a release zip.",
+            status="verified",
         ),
         Command(
             "package",
             _cmd_package,
             args=["  path       Project path, default '.'.", "  --out-dir  Output directory for release zip."],
-            help_lines=["  package [path]        Create release zip excluding dist/tmp/.git.                \033[1;32m[VERIFIED]\033[0m"],
+            usage="package [path]",
+            description="Create release zip excluding dist/tmp/.git.",
+            status="verified",
         ),
         Command(
             "install",
@@ -2163,28 +2283,35 @@ COMMANDS: dict[str, Command] = {
                 "  --to-dir   Mods root or custom directory.",
                 "  S4_MODS_DIR env var also overrides the auto-detected Mods folder.",
             ],
-            help_lines=["  install [path]        Install project into your Mods folder.                  \033[1;33m[LOCAL]\033[0m"],
+            usage="install [path]",
+            description="Install project into your Mods folder.",
+            status="local",
         ),
         Command(
             "doctor",
             _cmd_doctor,
-            help_lines=["  doctor                Run environment and path checks.                        \033[1;32m[VERIFIED]\033[0m"],
+            usage="doctor",
+            description="Run environment and path checks.",
+            status="verified",
         ),
         Command(
             "version",
             _cmd_version,
-            help_lines=["  version               Print CLI version."],
+            usage="version",
+            description="Print CLI version.",
         ),
         Command(
             "help",
             _cmd_help,
-            help_lines=["  help <cmd>            Show help for a subcommand."],
+            usage="help <cmd>",
+            description="Show help for a subcommand.",
         ),
         Command(
             "generate",
             _cmd_generate,
             args=["  mod_type   Supported mod type", "  name       Module or object name", "  --param k=v   Scalar tuning params, repeatable."],
-            help_lines=["  generate <type> <name> Generate a Sims 4 mod scaffold."],
+            usage="generate <type> <name>",
+            description="Generate a Sims 4 mod scaffold.",
         ),
         Command(
             "wizard",
@@ -2194,12 +2321,14 @@ COMMANDS: dict[str, Command] = {
                 "  name       Module or object name (required when non-interactive)",
                 "  --param k=v   Scalar tuning params, repeatable; skips the matching prompt.",
             ],
-            help_lines=["  wizard <type> [name]     Guided mod creation with brain advice."],
+            usage="wizard <type> [name]",
+            description="Guided mod creation with brain advice.",
         ),
         Command(
             "changelog",
             _cmd_changelog,
-            help_lines=["  changelog [path]         Add/update CHANGELOG.md."],
+            usage="changelog [path]",
+            description="Add/update CHANGELOG.md.",
         ),
         Command("tune-ids", _cmd_tune_ids),
         Command("pipeline", _cmd_pipeline),
@@ -2214,6 +2343,7 @@ COMMANDS: dict[str, Command] = {
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
+    argv = [a for a in argv if a != "--no-color"]  # global flag, consumed by NO_COLOR at import
 
     if not argv or argv[:1] in (["-h"], ["--help"]):
         print_help(is_subcommand=False, command="")

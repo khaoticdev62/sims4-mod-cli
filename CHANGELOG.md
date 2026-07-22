@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0 — 2026-07-22
+
+UI refinement: the terminal interface is rebuilt on `rich` (new runtime dependency for
+source installs; the portable exe bundles it).
+
+### Added
+- Auto-sized, closed panels and real aligned tables (help, pipeline, wizard summary)
+- Color-off support: `NO_COLOR` env var, `--no-color` flag, automatic plain output when piped
+- Legacy-console fallback: ASCII borders/glyph on non-UTF-8 or legacy Windows consoles
+  (plus hidden `S4_ASCII=1` override); VT processing on modern Windows via rich
+- Wizard: rich prompts, required-field re-ask, summary table with create-files confirmation
+- Pipeline status shows a progress bar
+
+### Changed
+- All inline ANSI replaced by a Rich `Theme` (ok/fail/verified/local/blocked/accent/head/hint/glyph)
+- `Command` registry metadata is now structured (`usage`/`description`/`status`) and rendered
+  as a table; supported kinds listed from `MOD_FACTORIES`
+- `install` no longer double-prints; doctor/game-python rows are key-aligned
+
+### Removed
+- Dead `_header`/`_status_label` helpers and the pre-colored `PROMPT_GLYPH`
+
 ## 0.2.0 — 2026-07-22
 
 Implementation of PLAN.md phases 0–5.

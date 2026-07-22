@@ -6,8 +6,8 @@ Guidance for AI coding agents working in this repository. Assumes no prior knowl
 
 S4Chemist (package name `s4chemist`, CLI entry point `s4chemist_cli`) is a portable, single-file
 Python CLI for scaffolding, validating, and packaging Sims 4 mod projects. The entire implementation
-lives in one module: `s4chemist_cli.py` (~2200 lines). There is no framework and no runtime
-dependencies (`dependencies = []` in `pyproject.toml`); Python >= 3.9 is required.
+lives in one module: `s4chemist_cli.py` (~2300 lines). The only runtime dependency is `rich`
+(for the terminal UI); Python >= 3.9 is required.
 
 Key files:
 
@@ -117,16 +117,20 @@ manually via `pipeline unlock/reset`.
 - `doctor_check()` / `ensure_game_python()` are environment probes with no side effects.
 
 ### Output styling
-All commands render through shared helpers — `_status_panel`, `_meta_block`, `_kv_block`,
-`_section`, `_status_label`, `_header` — that build the "Hermes-style" colored terminal panels
-(inline ANSI codes). Reuse these helpers for new commands rather than hand-rolling print formatting.
+The UI is built on `rich` (the only runtime dependency). All commands render through shared
+helpers — `_status_panel` (auto-sized closed panel; body items may be markup strings or Rich
+renderables like `Table`), `_meta_block`, `_kv_block`, `_section` — styled by the `THEME`
+tags. Rules: never inline raw ANSI; always escape user-derived strings with `_esc()`.
+Color is auto-disabled when piped, with `NO_COLOR`, or `--no-color`; `_ascii_mode()` (legacy
+console, non-UTF-8 stream, or `S4_ASCII=1`) switches box glyphs and the `❯` prompt to ASCII.
 
 ## Code style guidelines
 
 - Single-file module: keep everything in `s4chemist_cli.py`; do not split into packages without a
   deliberate refactor.
-- No runtime dependencies — stdlib only. The PyInstaller build bundles just the script, so the CLI
-  must stay self-contained (no runtime file reads outside the target project directory).
+- One runtime dependency: `rich` (terminal UI). No other third-party packages; the PyInstaller
+  build bundles both, so the CLI must stay self-contained (no runtime file reads outside the
+  target project directory).
 - Ruff: line-length 120, target py311 (see `pyproject.toml`); mypy checks only `s4chemist_cli.py`.
 - Match existing idioms: `pathlib.Path` everywhere, typed function signatures, `_`-prefixed
   private helpers, ANSI panel helpers for all user-facing output.

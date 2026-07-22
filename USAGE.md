@@ -15,6 +15,9 @@ If the window closes immediately, open Command Prompt in that folder and run:
 ### pip install
 - `pip install s4chemist`
 
+### Run from source
+- `pip install rich` (only dependency), then `python s4chemist_cli.py --help`
+
 ## Verify install
 - `s4chemist_cli version`
 - `s4chemist_cli doctor`
