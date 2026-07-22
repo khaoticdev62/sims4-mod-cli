@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.2 — 2026-07-22
+
+### Fixed
+- Guided mod creation in the TUI ignored the dashboard's project path: the wizard modal and
+  generate form operated on the process cwd, silently scaffolding into the wrong folder (or
+  creating a new project there). Commands that work on "." now run with the dashboard project
+  as their working directory. Regression tests cover both forms from a foreign cwd.
+- Wizard modal title now carries the brand glyph.
+
 ## 0.9.1 — 2026-07-22
 
 ### Fixed

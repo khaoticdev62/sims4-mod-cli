@@ -194,12 +194,12 @@ def test_tui_wizard_modal_type_switch_rebuilds_params(tmp_project):
     _run(go())
 
 
-def test_tui_wizard_modal_creates_artifact(tmp_project):
+def test_tui_wizard_modal_creates_artifact(tmp_project, tmp_path):
     cli = _load_cli()
     import os
 
     old_cwd = os.getcwd()
-    os.chdir(tmp_project)
+    os.chdir(tmp_path)  # cwd is NOT the TUI project; the modal must still target it
     try:
         async def go():
             app = cli._make_tui_app(str(tmp_project))
@@ -217,6 +217,9 @@ def test_tui_wizard_modal_creates_artifact(tmp_project):
         _run(go())
     finally:
         os.chdir(old_cwd)
+    assert (tmp_project / "src" / "xml_snippets" / "ModalTrait_trait" / "ModalTrait_trait.xml").exists()
+    # and must NOT leak a new project into the wrong cwd
+    assert not (tmp_path / "ModalTrait").exists()
     assert (tmp_project / "src" / "xml_snippets" / "ModalTrait_trait" / "ModalTrait_trait.xml").exists()
 
 
@@ -237,12 +240,12 @@ def test_tui_wizard_modal_requires_name(tmp_project):
     _run(go())
 
 
-def test_tui_generate_creates_artifact(tmp_project):
+def test_tui_generate_creates_artifact(tmp_project, tmp_path):
     cli = _load_cli()
     import os
 
     old_cwd = os.getcwd()
-    os.chdir(tmp_project)  # generate works on the project in cwd
+    os.chdir(tmp_path)  # cwd is NOT the TUI project; generate must still target it
     try:
         async def go():
             app = cli._make_tui_app(str(tmp_project))

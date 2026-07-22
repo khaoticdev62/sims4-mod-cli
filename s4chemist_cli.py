@@ -34,7 +34,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 
 PIPELINE_PHASES = [
     "concept",
@@ -2389,7 +2389,7 @@ def _make_tui_app(project: str = "."):
 
         def compose(self) -> ComposeResult:
             with Vertical(id="wizard-form"):
-                yield Label("[bold]Guided mod creation[/]")
+                yield Label(f"[bold]{_brand_glyph()} Guided mod creation[/]")
                 yield Label("Mod type")
                 yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="w_type")
                 yield Label("Name (required)")
@@ -2445,7 +2445,7 @@ def _make_tui_app(project: str = "."):
             argv = ["wizard", mod_type, name]
             for key, value in self._param_values().items():
                 argv += ["--param", f"{key}={value}"]
-            self.app.run_command(argv)  # type: ignore[attr-defined]
+            self.app.run_command(argv, cwd=self.app._proj())  # type: ignore[attr-defined]
             self.dismiss()
 
         @on(Button.Pressed, "#w_cancel")
@@ -2654,22 +2654,29 @@ def _make_tui_app(project: str = "."):
             self.query_one(TabbedContent).active = "tab-log"
 
         @work(thread=True)
-        def run_command(self, argv: list[str]) -> None:
+        def run_command(self, argv: list[str], cwd: str | None = None) -> None:
             import contextlib
             import io
+            import os
 
             buf = io.StringIO()
             rc = 0
-            with contextlib.redirect_stdout(buf):
-                try:
-                    rc = main(argv)
-                except SystemExit as exc:
-                    rc = 1
-                    if exc.code:
-                        print(exc.code)
-                except Exception as exc:  # keep the UI alive on command errors
-                    rc = 1
-                    print(f"error: {exc}")
+            old_cwd = os.getcwd()
+            if cwd:
+                os.chdir(cwd)  # commands like wizard/generate operate on "."
+            try:
+                with contextlib.redirect_stdout(buf):
+                    try:
+                        rc = main(argv)
+                    except SystemExit as exc:
+                        rc = 1
+                        if exc.code:
+                            print(exc.code)
+                    except Exception as exc:  # keep the UI alive on command errors
+                        rc = 1
+                        print(f"error: {exc}")
+            finally:
+                os.chdir(old_cwd)
             self.call_from_thread(self._append_log, argv, buf.getvalue(), rc)
             self.call_from_thread(self.refresh_pipeline)
 
@@ -2708,7 +2715,7 @@ def _make_tui_app(project: str = "."):
                 self._append_log(["generate"], "name is required", 2)
                 return
             mod_type = self.query_one("#mod_type", Select).value
-            self.run_command(["generate", str(mod_type), name])
+            self.run_command(["generate", str(mod_type), name], cwd=self._proj())
 
         @on(Input.Submitted, "#project")
         def _project_submitted(self) -> None:
