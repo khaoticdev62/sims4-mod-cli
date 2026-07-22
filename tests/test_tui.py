@@ -164,7 +164,7 @@ def test_tui_wizard_modal_requires_name(tmp_project):
 
     async def go():
         app = cli._make_tui_app(str(tmp_project))
-        async with app.run_test(size=(120, 40)) as pilot:
+        async with app.run_test(size=(120, 40)):
             from textual.widgets import Button, Label
             app.query_one("#open-wizard", Button).press()
             assert await _wait_for(lambda: type(app.screen_stack[-1]).__name__ == "WizardScreen")
