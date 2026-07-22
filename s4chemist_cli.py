@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import sys
 import zipfile
@@ -31,7 +32,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 PIPELINE_PHASES = [
     "concept",
@@ -2340,12 +2341,47 @@ COMMANDS: dict[str, Command] = {
 }
 
 
+def interactive_shell() -> int:
+    """REPL used when launched with no arguments on a real terminal
+    (e.g. double-clicking the exe): shows help, then accepts commands until
+    'exit'/'quit', EOF, or Ctrl+C."""
+    print_help(is_subcommand=False, command="")
+    while True:
+        try:
+            line = Prompt.ask(f"[glyph]{_glyph()}[/] [head]s4chemist_cli[/]", console=_console)
+        except (EOFError, KeyboardInterrupt):
+            _console.print()
+            return 0
+        line = (line or "").strip()
+        if not line:
+            continue
+        if line.lower() in ("exit", "quit", ":q"):
+            return 0
+        try:
+            args = shlex.split(line)
+        except ValueError as exc:
+            _console.print(f"[fail]{_esc(exc)}[/]")
+            continue
+        try:
+            main(args)
+        except SystemExit as exc:  # e.g. _existing_project() rejects a path
+            if exc.code:
+                _console.print(f"[fail]{_esc(exc.code)}[/]")
+        except KeyboardInterrupt:
+            _console.print("[local]Interrupted[/]")
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     argv = [a for a in argv if a != "--no-color"]  # global flag, consumed by NO_COLOR at import
 
-    if not argv or argv[:1] in (["-h"], ["--help"]):
+    if not argv:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            return interactive_shell()
+        print_help(is_subcommand=False, command="")
+        return 0
+    if argv[:1] in (["-h"], ["--help"]):
         print_help(is_subcommand=False, command="")
         return 0
 

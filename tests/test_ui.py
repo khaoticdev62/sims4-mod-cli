@@ -104,6 +104,27 @@ def run_wizard_in_process(cwd, argv, typed):
     return output, rc
 
 
+def test_bare_launch_piped_prints_help_and_exits():
+    stdout, _, rc = run_cli([], REPO_ROOT)
+    assert rc == 0
+    assert "COMMANDS" in stdout
+
+
+def test_interactive_shell_runs_commands_and_exits(tmp_project):
+    typed = "version\nbadcmd\nexit\n"
+    output, rc = run_wizard_in_process(tmp_project, [], typed)
+    assert rc == 0
+    assert "COMMANDS" in output               # help shown on entry
+    assert "s4chemist_cli v" in output        # dispatched 'version'
+    assert "Unknown command: badcmd" in output  # error shown, shell kept going
+
+
+def test_interactive_shell_quit_alias(tmp_project):
+    output, rc = run_wizard_in_process(tmp_project, [], "quit\n")
+    assert rc == 0
+    assert "COMMANDS" in output
+
+
 def test_wizard_interactive_confirm_accept(tmp_project):
     typed = "FancyTrait\n"      # label
     typed += "\n"               # description -> default

@@ -4,6 +4,7 @@ Files:
 - s4chemist_cli.py : portable Hermes-style CLI (requires `rich` for source runs)
 
 Common commands:
+- python s4chemist_cli.py            (interactive shell when run in a terminal; 'exit' to quit)
 - python s4chemist_cli.py --help
 - python s4chemist_cli.py help <cmd>
 - python s4chemist_cli.py init <name>

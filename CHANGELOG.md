@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — 2026-07-22
+
+### Added
+- Interactive shell: launching with no arguments on a real terminal (e.g. double-clicking the
+  exe) now opens a `❯ s4chemist_cli` prompt loop instead of printing help and exiting — the
+  window stays open and commands can be entered directly. Type `exit`/`quit`, EOF, or Ctrl+C
+  to leave. Piped/no-TTY launches still print help and exit.
+
 ## 0.3.0 — 2026-07-22
 
 UI refinement: the terminal interface is rebuilt on `rich` (new runtime dependency for

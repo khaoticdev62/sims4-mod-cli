@@ -45,7 +45,9 @@ python s4chemist_cli.py doctor
 
 ### Command dispatch
 `main()` at the bottom of `s4chemist_cli.py` dispatches through the `COMMANDS` registry: a dict
-of `Command` entries mapping each command name to a `_cmd_<name>(argv) -> int` handler. Each handler parses its own flags positionally,
+of `Command` entries mapping each command name to a `_cmd_<name>(argv) -> int` handler. Bare
+launch with no args opens `interactive_shell()` (a REPL around the same dispatch) when stdin and
+stdout are TTYs, and prints help otherwise. Each handler parses its own flags positionally,
 calls the relevant function, prints a `_status_panel(...)` block, and returns an int exit code. Help
 text is data-driven: `Command.args` feeds the ARGS section of `print_help()` subcommand help and
 `Command.help_lines` feeds the main COMMANDS panel. When adding a new top-level command, add a
