@@ -33,7 +33,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 PIPELINE_PHASES = [
     "concept",
@@ -2247,24 +2247,151 @@ _TUI_CSS = """
 #sidebar { width: 30; padding: 1; border-right: solid $primary; }
 #sidebar Label { margin-top: 1; }
 #sidebar Button { width: 100%; margin-top: 1; }
-DataTable { height: auto; max-height: 55%; }
-RichLog { border-top: solid $primary; height: 1fr; }
+DataTable { height: auto; max-height: 70%; }
+#phase-detail { padding: 0 1; border-top: solid $primary; height: auto; }
+#preview { border-left: solid $primary; }
+RichLog { height: 1fr; }
 Horizontal { height: 1fr; }
+WizardScreen { align: center middle; }
+#wizard-form { width: 64; height: auto; max-height: 90%; padding: 1 2; border: solid $primary; background: $surface; }
+#wizard-form Label { margin-top: 1; }
+#wizard-form Button { margin-top: 1; margin-right: 1; }
+#w_error { color: $error; }
 """
+
+_PREVIEW_LEXERS = {
+    ".xml": "xml", ".py": "python", ".yaml": "yaml", ".yml": "yaml",
+    ".md": "markdown", ".txt": "text", ".json": "json", ".template": "xml",
+}
 
 
 def _make_tui_app(project: str = "."):
     """Build the Textual dashboard app. Imports are deferred so plain CLI
     commands stay fast and do not require textual installed."""
+    from functools import partial
+
+    from rich.syntax import Syntax
     from textual import on, work
     from textual.app import App, ComposeResult
+    from textual.command import Hit, Provider
     from textual.containers import Horizontal, Vertical, VerticalScroll
-    from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, Select
+    from textual.screen import ModalScreen
+    from textual.widgets import (
+        Button, DataTable, DirectoryTree, Footer, Header, Input, Label,
+        RichLog, Select, Static, TabbedContent, TabPane,
+    )
+
+    class WizardScreen(ModalScreen):
+        """Multi-field guided-creation form (dynamic params per mod type)."""
+
+        _params_built_for: str | None = None
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="wizard-form"):
+                yield Label("[bold]Guided mod creation[/]")
+                yield Label("Mod type")
+                yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="w_type")
+                yield Label("Name (required)")
+                yield Input(placeholder="module/object name", id="w_name")
+                yield Label("Parameters")
+                yield Vertical(id="w_params")
+                yield Label("", id="w_error")
+                with Horizontal():
+                    yield Button("Create", id="w_create", variant="success")
+                    yield Button("Cancel", id="w_cancel")
+
+        def on_mount(self) -> None:
+            self._build_params()
+
+        @on(Select.Changed, "#w_type")
+        def _type_changed(self) -> None:
+            self._build_params()
+
+        def _build_params(self) -> None:
+            """(Re)build param inputs for the selected type; guards against the
+            on_mount + Select.Changed double-fire racing remove_children()."""
+            container = self.query_one("#w_params", Vertical)
+            mod_type = str(self.query_one("#w_type", Select).value)
+            if self._params_built_for == mod_type:
+                return
+            self._params_built_for = mod_type
+            preset = wizard_presets(mod_type)
+            wanted = [(f, preset.get("defaults", {}).get(f, "")) for f in preset.get("params", [])]
+            existing = {w.placeholder: w for w in container.children if isinstance(w, Input)}
+            if list(existing) == [f for f, _ in wanted]:
+                return
+            for child in list(container.children):
+                child.remove()
+            for param_field, default in wanted:
+                container.mount(Input(value=default, placeholder=param_field, id=f"w_param_{param_field}"))
+
+        def _param_values(self) -> dict[str, str]:
+            values = {}
+            for widget in self.query_one("#w_params", Vertical).children:
+                if isinstance(widget, Input) and widget.value.strip():
+                    values[widget.placeholder] = widget.value.strip()
+            return values
+
+        @on(Button.Pressed, "#w_create")
+        def _create(self) -> None:
+            name = self.query_one("#w_name", Input).value.strip()
+            if not name:
+                self.query_one("#w_error", Label).update("name is required")
+                return
+            mod_type = str(self.query_one("#w_type", Select).value)
+            argv = ["wizard", mod_type, name]
+            for key, value in self._param_values().items():
+                argv += ["--param", f"{key}={value}"]
+            self.app.run_command(argv)  # type: ignore[attr-defined]
+            self.dismiss()
+
+        @on(Button.Pressed, "#w_cancel")
+        def _cancel(self) -> None:
+            self.dismiss()
+
+    class S4Commands(Provider):
+        """Command palette entries (Ctrl+P)."""
+
+        def _entries(self) -> list[tuple[str, list[str] | str]]:
+            app = self.app
+            proj = app._proj()  # type: ignore[attr-defined]
+            return [
+                ("Validate project", ["validate", proj]),
+                ("Build project zip", ["build", proj]),
+                ("Package release zip", ["package", proj]),
+                ("Add changelog entry", ["changelog", proj]),
+                ("Tune IDs", ["tune-ids", proj]),
+                ("Doctor (environment checks)", ["doctor"]),
+                ("Refresh pipeline table", "refresh"),
+                ("Open wizard form", "wizard"),
+            ]
+
+        async def search(self, query: str):
+            matcher = self.matcher(query)
+            for label, action in self._entries():
+                score = matcher.match(label)
+                if score > 0:
+                    yield Hit(score, matcher.highlight(label), partial(self._dispatch, action), help=label)
+
+        async def discover(self):
+            for label, action in self._entries():
+                yield Hit(1.0, label, partial(self._dispatch, action), help=label)
+
+        def _dispatch(self, action: list[str] | str) -> None:
+            app = self.app
+            if action == "refresh":
+                app.refresh_pipeline()  # type: ignore[attr-defined]
+            elif action == "wizard":
+                app.push_screen(WizardScreen())  # type: ignore[attr-defined]
+            else:
+                app.run_command(action)  # type: ignore[attr-defined]
 
     class S4Tui(App):
         CSS = _TUI_CSS
         TITLE = "S4Chemist"
-        BINDINGS = [("q", "quit", "Quit"), ("r", "refresh", "Refresh")]
+        COMMANDS = App.COMMANDS | {S4Commands}
+        history: list = []
+        BINDINGS = [("q", "quit", "Quit"), ("r", "refresh", "Refresh"), ("ctrl+p", "command_palette", "Palette")]
 
         def compose(self) -> ComposeResult:
             yield Header()
@@ -2279,21 +2406,31 @@ def _make_tui_app(project: str = "."):
                     yield Button("Changelog", id="changelog")
                     yield Button("Tune IDs", id="tune-ids")
                     yield Button("Doctor", id="doctor")
+                    yield Button("Wizard", id="open-wizard")
                     yield Label("Generate")
                     yield Select([(k, k) for k in MOD_FACTORIES], value="trait", id="mod_type")
                     yield Input(placeholder="module/object name", id="gen_name")
                     yield Button("Generate", id="generate")
-                with Vertical():
-                    yield DataTable(id="pipeline")
-                    yield RichLog(id="log", markup=True)
+                with TabbedContent():
+                    with TabPane("Pipeline", id="tab-pipeline"):
+                        yield DataTable(id="pipeline")
+                        yield Static("", id="phase-detail")
+                    with TabPane("Files", id="tab-files"):
+                        with Horizontal():
+                            yield Vertical(id="files-container")
+                            yield RichLog(id="preview", markup=True)
+                    with TabPane("Log", id="tab-log"):
+                        yield RichLog(id="log", markup=True)
             yield Footer()
 
         def on_mount(self) -> None:
+            self.history = []  # per-instance log mirror (class attr is just the default)
             self.query_one("#pipeline", DataTable).add_columns("Phase", "Status", "Hint")
             self.refresh_pipeline()
 
         def action_refresh(self) -> None:
             self.refresh_pipeline()
+            self._reload_tree()
 
         def _proj(self) -> str:
             return self.query_one("#project", Input).value.strip() or "."
@@ -2304,6 +2441,7 @@ def _make_tui_app(project: str = "."):
             proj = Path(self._proj())
             if not (proj / "s4modconfig.yaml").exists():
                 table.add_row("-", "-", "not a project (set path or run init)")
+                self._show_phase_detail(-1)
                 return
             state = load_pipeline_state(proj)
             cur = current_phase(state)
@@ -2312,13 +2450,63 @@ def _make_tui_app(project: str = "."):
                 active = p == cur and not locked
                 marker = "DONE" if locked else ("ACTIVE" if active else "WAIT")
                 table.add_row(PIPELINE_META[p]["name"], marker, PIPELINE_META[p]["hint"])
+            self._show_phase_detail(PIPELINE_PHASES.index(cur))
+
+        def _show_phase_detail(self, index: int) -> None:
+            detail = self.query_one("#phase-detail", Static)
+            if index < 0 or index >= len(PIPELINE_PHASES):
+                detail.update("")
+                return
+            phase = PIPELINE_PHASES[index]
+            meta = PIPELINE_META[phase]
+            detail.update(
+                Text.assemble(
+                    ("Phase: ", "bold white"), (meta["name"], ""), ("  Hint: ", "bold white"), (meta["hint"], ""),
+                    ("\nNext: ", "bold white"), (meta.get("next", ""), ""),
+                    ("  Artifact: ", "bold white"), (meta.get("artifact", ""), ""),
+                )
+            )
+
+        @on(DataTable.RowSelected, "#pipeline")
+        def _row_selected(self, event: DataTable.RowSelected) -> None:
+            self._show_phase_detail(event.cursor_row)
+
+        def _ensure_tree(self) -> None:
+            container = self.query_one("#files-container", Vertical)
+            if not container.children:
+                container.mount(DirectoryTree(self._proj(), id="files"))
+
+        def _reload_tree(self) -> None:
+            if self.query("#files"):
+                self.query_one("#files", DirectoryTree).path = Path(self._proj())
+
+        @on(TabbedContent.TabActivated)
+        def _tab_activated(self, event: TabbedContent.TabActivated) -> None:
+            if self.query_one(TabbedContent).active == "tab-files":
+                self._ensure_tree()
+
+        @on(DirectoryTree.FileSelected, "#files")
+        def _file_selected(self, event: DirectoryTree.FileSelected) -> None:
+            preview = self.query_one("#preview", RichLog)
+            preview.clear()
+            path = Path(event.path)
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                preview.write(f"cannot read: {exc}")
+                return
+            lexer = _PREVIEW_LEXERS.get(path.suffix.lower(), "text")
+            preview.write(Syntax(text[:20000], lexer, theme="ansi_dark", line_numbers=True))
 
         def _append_log(self, argv: list[str], text: str, rc: int) -> None:
+            entry = f"$ s4chemist_cli {' '.join(argv)}  (exit {rc})\n{text.rstrip()}"
+            self.history.append(entry)
             log = self.query_one("#log", RichLog)
             log.write(f"[bold]$ s4chemist_cli {' '.join(argv)}[/]  (exit {rc})")
             if text.strip():
                 log.write(text.rstrip())
             log.write("")
+            self.query_one(TabbedContent).active = "tab-log"
 
         @work(thread=True)
         def run_command(self, argv: list[str]) -> None:
@@ -2364,6 +2552,10 @@ def _make_tui_app(project: str = "."):
         def _doctor(self) -> None:
             self.run_command(["doctor"])
 
+        @on(Button.Pressed, "#open-wizard")
+        def _open_wizard(self) -> None:
+            self.push_screen(WizardScreen())
+
         @on(Button.Pressed, "#generate")
         def _generate(self) -> None:
             name = self.query_one("#gen_name", Input).value.strip()
@@ -2376,6 +2568,7 @@ def _make_tui_app(project: str = "."):
         @on(Input.Submitted, "#project")
         def _project_submitted(self) -> None:
             self.refresh_pipeline()
+            self._reload_tree()
 
     return S4Tui()
 

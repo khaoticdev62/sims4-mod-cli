@@ -122,7 +122,8 @@ manually via `pipeline unlock/reset`.
 
 ### Output styling
 The UI is built on `rich` (panels/tables) with `questionary`/`prompt_toolkit` for menus and the REPL, and `textual` for the
-`tui` dashboard (pipeline table, command buttons, generate form, log pane). All commands render through shared
+`tui` dashboard (tabbed: pipeline table + phase detail, lazy file tree with syntax
+preview, wizard modal form, command palette via Ctrl+P, log pane). All commands render through shared
 helpers — `_status_panel` (auto-sized closed panel; body items may be markup strings or Rich
 renderables like `Table`), `_meta_block`, `_kv_block`, `_section` — styled by the `THEME`
 tags. Rules: never inline raw ANSI; always escape user-derived strings with `_esc()`.

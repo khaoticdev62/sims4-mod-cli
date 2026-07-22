@@ -34,7 +34,6 @@ def test_tui_app_loads_with_pipeline_table(tmp_project):
 
 def test_tui_validate_button_streams_to_log(tmp_project):
     cli = _load_cli()
-    from textual.widgets import RichLog
 
     async def go():
         app = cli._make_tui_app(str(tmp_project))
@@ -43,8 +42,7 @@ def test_tui_validate_button_streams_to_log(tmp_project):
             app.query_one("#validate", Button).press()
             await pilot.pause()
             await app.workers.wait_for_complete()
-            log = app.query_one("#log", RichLog)
-            text = "\n".join(getattr(strip, "text", str(strip)) for strip in log.lines)
+            text = "\n".join(app.history)
             assert "validate" in text
             assert "Validation" in text
 
@@ -53,7 +51,6 @@ def test_tui_validate_button_streams_to_log(tmp_project):
 
 def test_tui_generate_requires_name(tmp_project):
     cli = _load_cli()
-    from textual.widgets import RichLog
 
     async def go():
         app = cli._make_tui_app(str(tmp_project))
@@ -61,9 +58,108 @@ def test_tui_generate_requires_name(tmp_project):
             from textual.widgets import Button
             app.query_one("#generate", Button).press()
             await pilot.pause()
-            log = app.query_one("#log", RichLog)
-            text = "\n".join(getattr(strip, "text", str(strip)) for strip in log.lines)
-            assert "name is required" in text
+            assert "name is required" in "\n".join(app.history)
+
+    _run(go())
+
+
+def test_tui_has_three_tabs(tmp_project):
+    cli = _load_cli()
+    from textual.widgets import TabbedContent, TabPane
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(120, 40)):
+            tabs = app.query_one(TabbedContent)
+            pane_ids = [pane.id for pane in tabs.query(TabPane)]
+            assert pane_ids == ["tab-pipeline", "tab-files", "tab-log"]
+
+    _run(go())
+
+
+def test_tui_files_tab_lazy_mounts_tree(tmp_project):
+    cli = _load_cli()
+    from textual.widgets import TabbedContent
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(120, 40)) as pilot:
+            assert len(app.query("#files")) == 0  # not mounted at startup
+            app.query_one(TabbedContent).active = "tab-files"
+            await pilot.pause()
+            assert len(app.query("#files")) == 1  # lazy-mounted on first activation
+
+    _run(go())
+
+
+def test_tui_phase_detail_updates_on_row(tmp_project):
+    cli = _load_cli()
+    from textual.widgets import Static
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(120, 40)):
+            app._show_phase_detail(0)
+            detail = app.query_one("#phase-detail", Static)
+            text = str(detail.content)
+            assert "Concept" in text
+            assert "Artifact" in text
+
+    _run(go())
+
+
+def test_tui_palette_provider_returns_hits(tmp_project):
+    cli = _load_cli()
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(120, 40)):
+            provider = next(c(app.screen) for c in type(app).COMMANDS if c.__name__ == "S4Commands")
+            hits = [hit async for hit in provider.search("valid")]
+            assert any("Validate" in str(hit.match_display) for hit in hits)
+
+    _run(go())
+
+
+def test_tui_wizard_modal_creates_artifact(tmp_project):
+    cli = _load_cli()
+    import os
+
+    old_cwd = os.getcwd()
+    os.chdir(tmp_project)
+    try:
+        async def go():
+            app = cli._make_tui_app(str(tmp_project))
+            async with app.run_test(size=(120, 40)) as pilot:
+                from textual.widgets import Button, Input
+                app.query_one("#open-wizard", Button).press()
+                await pilot.pause()
+                screen = app.screen_stack[-1]
+                assert type(screen).__name__ == "WizardScreen"
+                screen.query_one("#w_name", Input).value = "ModalTrait"
+                screen.query_one("#w_create", Button).press()
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+
+        _run(go())
+    finally:
+        os.chdir(old_cwd)
+    assert (tmp_project / "src" / "xml_snippets" / "ModalTrait_trait" / "ModalTrait_trait.xml").exists()
+
+
+def test_tui_wizard_modal_requires_name(tmp_project):
+    cli = _load_cli()
+
+    async def go():
+        app = cli._make_tui_app(str(tmp_project))
+        async with app.run_test(size=(120, 40)) as pilot:
+            from textual.widgets import Button, Label
+            app.query_one("#open-wizard", Button).press()
+            await pilot.pause()
+            screen = app.screen_stack[-1]
+            screen.query_one("#w_create", Button).press()
+            await pilot.pause()
+            assert "name is required" in str(screen.query_one("#w_error", Label).content)
 
     _run(go())
 

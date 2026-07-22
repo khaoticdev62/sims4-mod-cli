@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 — 2026-07-22
+
+TUI deepening.
+
+### Added
+- Dashboard tabs: Pipeline / Files / Log. Files tab has a lazy-mounted directory tree with
+  syntax-highlighted file preview (xml/python/yaml/markdown)
+- Wizard modal form: mod type + required name + dynamic per-type parameter fields with inline
+  validation; runs through the standard wizard pipeline
+- Command palette (Ctrl+P) with fuzzy search over dashboard actions
+- Pipeline phase detail panel (hint / next step / expected artifact) updates on row selection
+- Log pane mirrors to a plain-text `history` list; auto-switches to the Log tab on new output
+
+### Fixed
+- DirectoryTree now mounts lazily (eager mount deadlocked worker callbacks)
+- Wizard param form guards against the mount + Select.Changed double-fire race
+
 ## 0.5.0 — 2026-07-22
 
 ### Added
