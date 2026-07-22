@@ -1,21 +1,28 @@
 # Packaging & Distribution
 
-This release layout is designed for zip distribution and Mods-folder installs.
+This release layout is designed for zip distribution and Mods-folder installs from a checked-out repo.
 
 DISTRIBUTION FILES
-- C:\Users\thecr\s4chemist\s4chemist_cli.py
-- C:\Users\thecr\s4chemist\OWNERS-GUIDE.txt
-- C:\Users\thecr\s4chemist\docs\sims4-mod-types.md
+- `s4chemist_cli.py` at your repo root
+- `OWNERS-GUIDE.txt`
+- `docs/sims4-mod-types.md`
 
-RELEASE ZIP CONTENTS
+CLI TOOL RELEASE ZIP CONTENTS
+(the portable distribution archive for S4Chemist itself, e.g. the PyInstaller build)
 - s4chemist_cli.py
 - OWNERS-GUIDE.txt
 - docs/sims4-mod-types.md
 
-CREATE RELEASE ZIP
-1. Open terminal in C:\Users\thecr\s4chemist
-2. Run: python "$SK" build
-3. Zip the dist/ output or use package_release() for a release-named archive.
+CREATE CLI TOOL RELEASE ZIP
+1. Open terminal at the repo root
+2. Run: pyinstaller s4chemist_cli.spec
+3. Zip the dist/ output, or hand-assemble the files listed above.
+
+MOD PROJECT BUILD/PACKAGE OUTPUT
+`build`/`package` zip up a mod *project* directory (created via `init`), not the
+S4Chemist repo. They always exclude `dist/`, `tmp/`, and `.git*`. `package`
+(and `build --release`, which is equivalent) additionally excludes
+`OWNERS-GUIDE.txt` if a copy happens to be present inside the project.
 
 INSTALL FOR USERS
 1. Python 3.10 or later

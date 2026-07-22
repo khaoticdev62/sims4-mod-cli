@@ -1,7 +1,7 @@
 SIM4 MOD CLI OWNER GUIDE
-Project: C:\Users\thecr\s4chemist
-Core file: C:\Users\thecr\s4chemist\s4chemist_cli.py
-Docs: C:\Users\thecr\s4chemist\docs\sims4-mod-types.md
+Project: current checkout containing `s4chemist_cli.py`
+Core file: `s4chemist_cli.py`
+Docs: `docs/sims4-mod-types.md`
 
 WHAT THIS IS
 This is a portable Sims 4 mod authoring helper. It creates project folders, XML/script scaffolds, packaging zips, and changelogs. It also includes a wizard that asks simple questions and gives modding guidance before you build.

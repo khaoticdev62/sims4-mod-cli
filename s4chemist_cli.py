@@ -12,9 +12,10 @@ import re
 import shutil
 import sys
 import zipfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime
-from typing import Iterable
+from typing import Callable, Iterable
 
 if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     try:
@@ -243,6 +244,17 @@ def _advance_pipeline_if_artifact(proj: Path, artifact_rel: str) -> None:
 ROOT = Path(__file__).resolve().parent
 
 
+def _argv_item_str(item: object) -> str:
+    return str(item)
+
+
+def _project_path_from_argv(argv: list[str], default: str = ".") -> str:
+    for arg in argv[1:]:
+        if not _argv_item_str(arg).startswith("-"):
+            return _argv_item_str(arg)
+    return default
+
+
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -393,40 +405,6 @@ def _existing_project(p: str | Path) -> Path:
     if missing:
         raise SystemExit(f"Not a valid project: {proj}\nMissing: {missing}")
     return proj
-
-
-def new_xml_snippet(proj: Path, name: str) -> Path:
-    d = proj / "src" / "xml_snippets" / name
-    _write(
-        d / f"{name}.xml",
-        "<?xml version='1.0' encoding='utf-8'?>\n"
-        f"<!-- {name} snippet -->\n<Snippets>\n  <!-- Replace this body with an XML Injector snippet or tuning fragment -->\n</Snippets>\n",
-    )
-    _write(d / "README.txt", f"XML Snippet: {name}\nEnable via XML Injector snippet slot when required.\n")
-    return d
-
-
-def new_ts4script(proj: Path, name: str) -> Path:
-    d = proj / "src" / "ts4script" / name
-    _write(
-        d / "main.py",
-        "import sims4.commands\nimport services\n\n\n@sims4.commands.Command('your.command.here', command_type=sims4.commands.CommandType.Live)\ndef your_command(_connection=None):\n    output = sims4.commands.output(_connection)\n    output('Hello from mod script!')\n",
-    )
-    _write(
-        d / "manifest.json",
-        '{\n  "name": "' + name + '",\n  "version": "0.1.0",\n  "entry": "main.py"\n}\n',
-    )
-    return d
-
-
-def new_package_mod(proj: Path, name: str) -> Path:
-    d = proj / "src" / "package" / name
-    _write(
-        d / f"{name}.package.template",
-        "Package binaries require Sims 4 Studio/s4pe + Tdesc Builder + EA resource tools to author and sign.\nSee current packaging docs for MODS_PACKAGE/EXTRA resource structure and tdesc files.\n",
-    )
-    _write(d / "README.txt", f"Package Tuning: {name}\nPurpose: behavioral tuning/custom-content base project.\n")
-    return d
 
 
 def _parse_kv_tokens(argv: list[str]) -> dict[str, str]:
@@ -1405,7 +1383,7 @@ def new_testset(proj: Path, name: str) -> Path:
         "<?xml version='1.0' encoding='utf-8'?>\n"
         f"<!-- {name} testset snippet -->\n"
         "<I d=\"0x00000000\">\n"
-        "  <T n=\"testset_name\">" + name + "</T>\n"
+        "  <T n=\"test_set_name\">" + name + "</T>\n"
         "  <L n=\"tests\">\n"
         "    <V t=\"test\"/>\n"
         "  </L>\n"
@@ -1502,72 +1480,136 @@ def new_motive(proj: Path, name: str) -> Path:
     return d
 
 
-def validate_project(proj: Path, strict: bool = False) -> int:
-    issues = 0
+MOD_FACTORIES = {
+    "xml_snippet": new_xml_snippet,
+    "ts4script": new_ts4script,
+    "package": new_package_mod,
+    "career": new_career,
+    "trait": new_trait,
+    "buff": new_buff,
+    "interaction": new_interaction,
+    "event": new_event,
+    "achievement": new_achievement,
+    "aspiration": new_aspiration,
+    "whim": new_whim,
+    "club": new_club,
+    "holiday": new_holiday,
+    "loot_action": new_loot_action,
+    "testset": new_testset,
+    "relationship": new_relationship,
+    "skill": new_skill,
+    "motive": new_motive,
+}
+
+
+def validate_project_issues(proj: Path, strict: bool = False) -> list[str]:
+    """Return actionable validation issues for a project (see docs/validation.md)."""
+    issues: list[str] = []
     if strict:
         cfg = proj / "s4modconfig.yaml"
         if not cfg.exists():
-            issues += 1
+            issues.append("s4modconfig.yaml: missing (run 's4chemist_cli init <name>' to scaffold a project)")
         else:
             txt = cfg.read_text(encoding="utf-8")
             if "ReplaceMe" in txt:
-                issues += 1
+                issues.append("s4modconfig.yaml: mod_name is still 'ReplaceMe' (set your real mod name)")
+            if "YourName" in txt:
+                issues.append("s4modconfig.yaml: creator is still 'YourName' (set your creator name)")
 
-    for xml in proj.rglob("*.xml"):
+    xml_files = list(proj.rglob("*.xml"))
+    for xml in xml_files:
+        rel = str(xml.relative_to(proj))
         try:
             txt = xml.read_text(encoding="utf-8", errors="ignore")
         except OSError:
-            issues += 1
+            issues.append(f"{rel}: unreadable file (check permissions/encoding)")
             continue
         if not txt.lstrip().startswith("<?xml"):
-            issues += 1
+            issues.append(f"{rel}: missing XML declaration (start the file with <?xml version='1.0' encoding='utf-8'?>)")
             continue
         stem = xml.name
         for kind, tags in TUNING_TAG_RULES.items():
             if stem.endswith(f"_{kind}.xml") or f"_{kind}." in stem or kind == stem:
                 missing = [t for t in tags if f'<T n="{t}">' not in txt and f'<U n="{t}">' not in txt]
-                if missing:
-                    issues += len(missing)
+                for tag in missing:
+                    issues.append(f"{rel}: missing '{tag}' tag required for {kind} tuning")
+        if strict:
+            if "0x00000000" in txt:
+                issues.append(f"{rel}: placeholder tuning id 0x00000000 (run 's4chemist_cli tune-ids {proj}' to assign real ids)")
+            if "Replace with" in txt:
+                issues.append(f"{rel}: placeholder flavor text 'Replace with ...' (write real display text)")
 
     pkg_candidates = list(proj.rglob("*.package")) + list(proj.rglob("*.package.template"))
-    xml_or_script_count = len(list(proj.rglob("*.xml"))) + len(list(proj.rglob("*.py")))
+    xml_or_script_count = len(xml_files) + len(list(proj.rglob("*.py")))
     if proj.joinpath("src", "package").exists() and not pkg_candidates and xml_or_script_count:
         pass
     elif not pkg_candidates:
-        issues += 1
+        issues.append("no .package artifact found (run 's4chemist_cli new <proj> package <name>' or author one in Sims4Studio)")
 
-    return max(issues, 0)
+    return issues
 
 
-def build_project(proj: Path, release: bool = False) -> Path:
+def validate_project(proj: Path, strict: bool = False) -> int:
+    return max(len(validate_project_issues(proj, strict=strict)), 0)
+
+
+def _mod_name_from_config(proj: Path) -> str:
+    mod_name = proj.name
     cfg_path = proj / "s4modconfig.yaml"
-    mod_name = "mod"
     if cfg_path.exists():
         for line in cfg_path.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith("mod_name:"):
                 mod_name = line.split(":", 1)[1].strip() or mod_name
                 break
+    return mod_name
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out = proj / "dist" / f"{mod_name}-{stamp}.zip"
+
+def _verify_archive(out: Path) -> None:
+    """Post-build archive integrity checks; aborts with SystemExit on failure."""
+    if not zipfile.is_zipfile(out):
+        raise SystemExit(f"Archive integrity check failed: not a zip file: {out}")
+    with zipfile.ZipFile(out) as zf:
+        bad = zf.testzip()
+        if bad is not None:
+            raise SystemExit(f"Archive integrity check failed: corrupt entry '{bad}' in {out}")
+        if not zf.namelist():
+            raise SystemExit(f"Archive integrity check failed: empty archive {out}")
+
+
+def _zip_project(proj: Path, out: Path, *, extra_excludes: tuple[str, ...] = ()) -> Path:
+    out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(proj.rglob("*")):
             if path.is_dir():
                 continue
             rel = path.relative_to(proj)
-            txt = str(rel)
+            txt = rel.as_posix()  # normalize: on Windows str(rel) uses backslashes
             if txt.startswith("dist/") or txt.startswith("tmp/"):
                 continue
             if txt == ".gitignore" or txt.startswith(".git"):
                 continue
+            if txt in extra_excludes:
+                continue
             zf.write(path, rel)
+    _verify_archive(out)
     return out
 
 
+def build_project(proj: Path) -> Path:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = proj / "dist" / f"{_mod_name_from_config(proj)}-{stamp}.zip"
+    return _zip_project(proj, out)
+
+
 def install_to_mods(proj: Path, mods_dir: str | None = None) -> Path:
-    target_path = None
+    # Priority: explicit --to-dir > S4_MODS_DIR env var > auto-detected Mods folder.
+    env_dir = os.environ.get("S4_MODS_DIR")
     if mods_dir:
         target_path = Path(mods_dir)
+    elif env_dir:
+        target_path = Path(env_dir)
+        if not target_path.exists():
+            raise SystemExit(f"S4_MODS_DIR does not exist: {target_path}")
     else:
         docs = Path.home() / "Documents"
         mods_candidate = docs / "Electronic Arts" / "The Sims 4" / "Mods"
@@ -1644,80 +1686,537 @@ def print_help(*, is_subcommand=False, command="", error="") -> None:
     if is_subcommand:
         panel.extend(_section(f"COMMAND \033[1;37m{command}\033[0m", []))
         panel.extend(_section("USAGE", [f"  {_prompt()}s4chemist_cli {command} [options]"]))
-        if command == "init":
-            panel.extend(_section("ARGS", ["  name       Project directory / mod name"]))
-        elif command == "new":
-            panel.extend(_section("ARGS", ["  where      Existing project path", "  kind       xml_snippet|ts4script|package|career|trait|buff|interaction|event|achievement|aspiration|whim|club|holiday|loot_action|testset|relationship|skill|motive", "  name       Artifact/module name"]))
-        elif command == "validate":
-            panel.extend(_section("ARGS", ["  path       Project path, default '.'.", "  --strict   Treat template values as errors."]))
-        elif command == "build":
-            panel.extend(_section("ARGS", ["  path       Project path, default '.'.", "  --release  Release packaging semantics."]))
-        elif command == "package":
-            panel.extend(_section("ARGS", ["  path       Project path, default '.'.", "  --out-dir  Output directory for release zip."]))
-        elif command == "install":
-            panel.extend(_section("ARGS", ["  path       Project path, default '.'.", "  --to-dir   Mods root or custom directory."]))
-        elif command == "generate":
-            panel.extend(_section("ARGS", ["  mod_type   Supported mod type", "  name       Module or object name", "  --param k=v   Scalar tuning params, repeatable."]))
+        entry = COMMANDS.get(command)
+        if entry and entry.args:
+            panel.extend(_section("ARGS", entry.args))
         panel.extend(_section("NOTES", ["  Status: \033[1;32mVERIFIED\033[0m = exercised end-to-end; \033[1;33mLOCAL PATH REQUIRED\033[0m = needs environment-specific value."]))
         panel.extend(_section("FOOTER", ["  \033[1;32m❯\033[0m s4chemist_cli <command>    Enter a command to start.", "  Run 's4chemist_cli doctor'   Verify environment paths.", "  Run 's4chemist_cli help <cmd>'  Show command help."]))
     else:
-        panel.extend(
-            _section(
-                "COMMANDS",
-                [
-                    "  \033[1;37mCOMMAND\033[0m          \033[1;37mDESCRIPTION / STATUS\033[0m",
-                    "  \033[1;37m-------\033[0m          \033[1;37m-------------------\033[0m",
-                    "  init <name>           Initialize a new mod project.                            \033[1;32m[VERIFIED]\033[0m",
-                    "  new <where> <kind>    Create xml_snippet, ts4script, package, career, trait, buff, interaction, event, or achievement artifact.      \033[1;32m[VERIFIED]\033[0m",
-                    "                       <kind>: xml_snippet | ts4script | package | career | trait | buff | interaction | event | achievement | aspiration | whim | club | holiday | loot_action | testset | relationship | skill | motive",
-                    "  validate [path]       Validate XML/packaging hygiene.                         \033[1;32m[VERIFIED]\033[0m",
-                    "  build [path]          Package current artifacts into a release zip.           \033[1;32m[VERIFIED]\033[0m",
-                    "  package [path]        Create release zip excluding dist/tmp/.git.                \033[1;32m[VERIFIED]\033[0m",
-                    "  install [path]        Install project into your Mods folder.                  \033[1;33m[LOCAL]\033[0m",
-                    "  doctor                Run environment and path checks.                        \033[1;32m[VERIFIED]\033[0m",
-                    "  version               Print CLI version.",
-                    "  help <cmd>            Show help for a subcommand.",
-                    "  generate <type> <name> Generate a Sims 4 mod scaffold.",
-                    "  wizard <type> [name]     Guided mod creation with brain advice.",
-                    "  changelog [path]         Add/update CHANGELOG.md.",
-                ],
-            )
-        )
+        command_lines = [
+            "  \033[1;37mCOMMAND\033[0m          \033[1;37mDESCRIPTION / STATUS\033[0m",
+            "  \033[1;37m-------\033[0m          \033[1;37m-------------------\033[0m",
+        ]
+        for entry in COMMANDS.values():
+            command_lines.extend(entry.help_lines)
+        panel.extend(_section("COMMANDS", command_lines))
         panel.extend(_section("STATUS KEY", ["  \033[1;32m[VERIFIED]\033[0m   = exercised end-to-end", "  \033[1;33m[LOCAL]\033[0m     = needs environment-specific value", "  \033[1;31m[BLOCKED]\033[0m   = missing dependency / environment"]))
         panel.extend(_section("FOOTER", ["  \033[1;32m❯\033[0m s4chemist_cli <command>    Enter a command to start.", "  Run 's4chemist_cli doctor'   Verify environment paths.", "  Run 's4chemist_cli help <cmd>'  Show command help."]))
 
     print(_status_panel(f"{'help' if is_subcommand else 's4chemist_cli'}", panel, command=command if is_subcommand else ""))
 
 def package_release(proj: Path, out_dir: Path | None = None) -> Path:
-    cfg_path = proj / "s4modconfig.yaml"
-    mod_name = proj.name
-    if cfg_path.exists():
-        for line in cfg_path.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("mod_name:"):
-                mod_name = line.split(":", 1)[1].strip() or mod_name
-                break
-
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = out_dir or (proj / "dist")
-    base.mkdir(parents=True, exist_ok=True)
-    out = base / f"{mod_name}-release-{stamp}.zip"
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(proj.rglob("*")):
-            if path.is_dir():
-                continue
-            rel = path.relative_to(proj)
-            txt = str(rel)
-            if txt.startswith("dist/") or txt.startswith("tmp/"):
-                continue
-            if txt == ".gitignore" or txt.startswith(".git"):
-                continue
-            if txt == "OWNERS-GUIDE.txt":
-                continue
-            zf.write(path, rel)
-    return out
+    out = base / f"{_mod_name_from_config(proj)}-release-{stamp}.zip"
+    return _zip_project(proj, out, extra_excludes=("OWNERS-GUIDE.txt",))
 
 def print_subcommand_help(command: str) -> None:
     print_help(is_subcommand=True, command=command)
+
+@dataclass
+class Command:
+    """Registry entry: dispatch handler plus data-driven help metadata."""
+
+    name: str
+    handler: Callable[[list[str]], int]
+    args: list[str] = field(default_factory=list)       # ARGS lines for subcommand help
+    help_lines: list[str] = field(default_factory=list)  # rows in the main COMMANDS panel
+
+
+def _cmd_init(argv: list[str]) -> int:
+    if not argv[1:]:
+        print_help(is_subcommand=True, command="init", error="Missing <name> argument.")
+        return 2
+    proj = init_project(argv[1])
+    print(
+        _status_panel(
+            "init",
+            _meta_block("verified", "Ready", argv[1])
+            + [f"Files: {', '.join(PROJECT_FILES)}"],
+            command="init",
+        )
+    )
+    _advance_pipeline_if_artifact(proj, "s4modconfig.yaml")
+    _advance_pipeline_if_artifact(proj, "mod_notes.txt")
+    return 0
+
+
+def _cmd_new(argv: list[str]) -> int:
+    if len(argv) < 4:
+        print_help(is_subcommand=True, command="new", error="Expected: new <where> <kind> <name>")
+        return 2
+    _, where, kind, name = argv[:4]
+    proj = _existing_project(where)
+    factory = MOD_FACTORIES.get(kind)
+    if factory is None:
+        print_help(is_subcommand=True, command="new", error=f"Unknown kind: {kind}")
+        return 2
+    print(_status_panel("new", _meta_block("verified", "Created", kind) + [f"Path: {factory(proj, name)}"], command="new"))
+    _advance_pipeline_if_artifact(proj, f"src/{kind}")
+    _advance_pipeline_if_artifact(proj, "src/xml_snippets")
+    _advance_pipeline_if_artifact(proj, "src/ts4script")
+    _advance_pipeline_if_artifact(proj, "src/package")
+    return 0
+
+
+def _cmd_validate(argv: list[str]) -> int:
+    path = _project_path_from_argv(argv)
+    strict = "--strict" in argv
+    proj = _existing_project(path)
+    found = validate_project_issues(proj, strict=strict)
+    issues = len(found)
+    state = "ok" if issues == 0 else "fail"
+    rows = _meta_block(state, "Validation", f"{issues} issue{'s' if issues != 1 else ''}")
+    if found:
+        rows += ["", f"{C_BOLD_WHITE}Issues:{C_RESET}"] + [f"  - {item}" for item in found[:15]]
+        if issues > 15:
+            rows.append(f"  ... and {issues - 15} more")
+        if not strict:
+            rows += ["", "Hint: rerun with --strict to also flag placeholder ids and template values."]
+    print(_status_panel("validate", rows, command="validate"))
+    _advance_pipeline_if_artifact(proj, "docs/validation_report.txt")
+    _advance_pipeline_if_artifact(proj, "tmp/lint_report.txt")
+    return issues
+
+
+def _cmd_build(argv: list[str]) -> int:
+    path = _project_path_from_argv(argv)
+    release = "--release" in argv
+    proj = _existing_project(path)
+    if release:
+        out = package_release(proj)
+    else:
+        out = build_project(proj)
+    print(_status_panel("build", _meta_block("verified", "Built", str(out)), command="build"))
+    _advance_pipeline_if_artifact(proj, "dist")
+    return 0
+
+
+def _cmd_package(argv: list[str]) -> int:
+    path = _project_path_from_argv(argv)
+    out_dir = None
+    if "--out-dir" in argv:
+        idx = argv.index("--out-dir")
+        if idx + 1 < len(argv):
+            out_dir = argv[idx + 1]
+    proj = _existing_project(path)
+    out = package_release(proj, out_dir=Path(out_dir) if out_dir else None)
+    print(_status_panel("package", _meta_block("verified", "Packaged", str(out)), command="package"))
+    _advance_pipeline_if_artifact(proj, "dist")
+    _advance_pipeline_if_artifact(proj, "tmp/release_manifest.txt")
+    return 0
+
+
+def _cmd_install(argv: list[str]) -> int:
+    path = _project_path_from_argv(argv)
+    to_dir = None
+    if "--to-dir" in argv:
+        idx = argv.index("--to-dir")
+        if idx + 1 < len(argv):
+            to_dir = argv[idx + 1]
+    target = install_to_mods(_existing_project(path), mods_dir=to_dir)
+    print(_status_panel("install", _meta_block("local", "Installed", str(target)), command="install"))
+    return 0
+
+
+def _cmd_doctor(argv: list[str]) -> int:
+    return doctor_check()
+
+
+def _cmd_version(argv: list[str]) -> int:
+    print(_status_panel("version", _meta_block("ok", "Version", "s4chemist_cli v0.1.1"), command="version"))
+    return 0
+
+
+def _cmd_help(argv: list[str]) -> int:
+    target = argv[1] if len(argv) > 1 else "s4chemist_cli"
+    if target == "s4chemist_cli":
+        print_help(is_subcommand=False, command="")
+    else:
+        print_subcommand_help(target)
+    return 0
+
+
+def _cmd_pipeline(argv: list[str]) -> int:
+    if len(argv) > 1 and argv[1] == "tune":
+        phase = argv[2] if len(argv) > 2 else None
+        path = _project_path_from_argv(argv[3:] or argv[2:], default=".")
+        if phase not in PIPELINE_PHASES:
+            print_help(is_subcommand=True, command="pipeline", error="Expected: pipeline tune <phase> [path]")
+            return 2
+        proj = _existing_project(path)
+        meta = PIPELINE_META.get(phase, {})
+        rows = _meta_block("ok", f"Tune: {meta.get('name', phase)}", meta.get("hint", ""))
+        rows += ["", f"{C_BOLD_WHITE}Example:{C_RESET}", f"  - {meta.get('next', '')}", f"{C_BOLD_WHITE}Artifact:{C_RESET} {meta.get('artifact', '')}"]
+        print(_status_panel("pipeline-tune", rows, command="pipeline tune"))
+        return 0
+    path = argv[1] if len(argv) > 1 else "."
+    proj = _existing_project(path)
+    print(print_pipeline_status(proj))
+    return 0
+
+
+def _cmd_pipeline_next(argv: list[str]) -> int:
+    path = argv[1] if len(argv) > 1 else "."
+    proj = _existing_project(path)
+    print(print_pipeline_next(proj))
+    return 0
+
+
+def _cmd_pipeline_unlock(argv: list[str]) -> int:
+    path = argv[1] if len(argv) > 1 else "."
+    proj = _existing_project(path)
+    print(unlock_current_phase(proj))
+    return 0
+
+
+def _cmd_pipeline_reset(argv: list[str]) -> int:
+    path = argv[1] if len(argv) > 1 else "."
+    proj = _existing_project(path)
+    print(reset_pipeline(proj))
+    return 0
+
+
+def _cmd_game_python(argv: list[str]) -> int:
+    ensure_game_python()
+    return 0
+
+
+def _cmd_generate(argv: list[str]) -> int:
+    if len(argv) < 3:
+        print_help(is_subcommand=True, command="generate", error="Expected: generate <mod_type> <name>")
+        return 2
+    mod_type = argv[1]
+    name = argv[2]
+    params = _parse_kv_tokens(argv[3:])
+    factory = MOD_FACTORIES.get(mod_type)
+    if factory is None:
+        print_help(is_subcommand=True, command="generate", error=f"Unknown mod type: {mod_type}")
+        return 2
+
+    try:
+        proj = _existing_project(".")
+    except SystemExit:
+        proj = _find_or_create_temp_project(name)
+
+    d = factory(proj, name)
+    _apply_params(proj, mod_type, name, params)
+    preset = wizard_presets(mod_type)
+    advice = compatibility_advice(mod_type)
+    deps = dependency_notes(mod_type)
+    note_kv = {k.replace("note.", "", 1): v for k, v in params.items() if k.startswith("note.")}
+    if note_kv:
+        state = load_pipeline_state(proj)
+        state.setdefault("notes", {}).update(note_kv)
+        save_pipeline_state(proj, state)
+    panel = [
+        _meta_block("verified", "Generated", f"{mod_type}: {name}")[0],
+        f"Path: {d}",
+        "",
+        f"{C_BOLD_WHITE}Brain Advice:{C_RESET}",
+        f"  {advice}",
+        "",
+        f"{C_BOLD_WHITE}Dependencies:{C_RESET}",
+    ] + [f"  - {item}" for item in deps] + [
+        "",
+        f"{C_BOLD_WHITE}Next Steps:{C_RESET}",
+    ] + [f"  - {item}" for item in preset.get("next_steps", [])]
+    _advance_pipeline_if_artifact(proj, f"src/{mod_type}")
+    _advance_pipeline_if_artifact(proj, "src/xml_snippets")
+    _advance_pipeline_if_artifact(proj, "src/ts4script")
+    _advance_pipeline_if_artifact(proj, "src/package")
+    if note_kv:
+        panel += [
+            "",
+            f"{C_BOLD_WHITE}Pipeline Notes Saved:{C_RESET}",
+        ] + [f"  {k}: {v}" for k, v in note_kv.items()]
+    print(_status_panel("generate", panel, command="generate"))
+    return 0
+
+
+def _cmd_changelog(argv: list[str]) -> int:
+    path = argv[1] if len(argv) > 1 else "."
+    try:
+        proj = _existing_project(path)
+    except SystemExit:
+        print_help(is_subcommand=True, command="changelog", error=f"Not a valid project: {path}")
+        return 2
+    changelog = proj / "CHANGELOG.md"
+    today = datetime.now().strftime("%Y-%m-%d")
+    content = f"# Changelog\n\n## {today}\n- Initial scaffold.\n"
+    if changelog.exists():
+        content = changelog.read_text(encoding="utf-8") + "\n" + content
+    _write(changelog, content)
+    print(_status_panel("changelog", _meta_block("verified", "Created", str(changelog)), command="changelog"))
+    _advance_pipeline_if_artifact(proj, "CHANGELOG.md")
+    return 0
+
+
+def _cmd_tune_ids(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print_help(is_subcommand=True, command="tune-ids", error="Expected: tune-ids <path>")
+        return 2
+    proj = _existing_project(argv[1])
+    touched = []
+    for xml in sorted(proj.rglob("*.xml")):
+        txt = xml.read_text(encoding="utf-8", errors="ignore")
+        updated = txt
+        updated, _ = _rewrite_stbl_placeholders(xml.stem, updated)
+        updated = updated.replace('<I d="0x00000000">', '<I d="' + _tuning_instance(xml.stem) + '">')
+        updated = updated.replace("<I d=\"0x00000000\">", "<I d=\"" + _tuning_instance(xml.stem) + "\">")
+        updated = updated.replace("<T n=\"career_icon\">0x00000000</T>", "<T n=\"career_icon\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
+        updated = updated.replace("<T n=\"display_name\">0x00000000</T>", "<T n=\"display_name\">" + _tuning_instance(xml.stem, "_display") + "</T>")
+        updated = updated.replace("<T n=\"description\">0x00000000</T>", "<T n=\"description\">" + _tuning_instance(xml.stem, "_desc") + "</T>")
+        updated = updated.replace("<T n=\"icon_resource\">0x00000000</T>", "<T n=\"icon_resource\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
+        updated = updated.replace("<U n=\"club_icon\">0x00000000</U>", "<U n=\"club_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
+        updated = updated.replace("<U n=\"holiday_icon\">0x00000000</U>", "<U n=\"holiday_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
+        idx = 0
+        def _replace_u(match):
+            nonlocal idx
+            suffix = f"_item{idx}"
+            idx += 1
+            return "<U>" + _tuning_instance(xml.stem, suffix) + "</U>"
+        updated = re.sub(r"<U>0x00000000</U>", _replace_u, updated)
+        updated = updated.replace("<T n=\"trait_facial_priority\">0</T>", "<T n=\"trait_facial_priority\">" + str(_fnv1a_64(xml.stem) & 0xFFFFFFFF) + "</T>")
+        updated = updated.replace("<U n=\"mood_weight\">1</U>", "<U n=\"mood_weight\">1</U>")
+        updated = updated.replace("<T n=\"animation_style\">None</T>", "<T n=\"animation_style\">None</T>")
+        updated = updated.replace("<U n=\"interaction_distance\">0</U>", "<U n=\"interaction_distance\">" + str(_fnv1a_64(xml.stem + "_distance") & 0xFFFFFFFF) + "</U>")
+        updated = updated.replace("<T n=\"pie_menu_priority\">0</T>", "<T n=\"pie_menu_priority\">" + str(_fnv1a_64(xml.stem + "_menu") & 0xFFFFFFFF) + "</T>")
+        updated = updated.replace("<T n=\"event_name\">" + xml.stem + "</T>", "<T n=\"event_name\">" + xml.stem + "</T>")
+        updated = updated.replace("<U n=\"duration\">120</U>", "<U n=\"duration\">120</U>")
+        updated = updated.replace("<U n=\"hidden\">0</U>", "<U n=\"hidden\">0</U>")
+        updated = updated.replace("<U n=\"entry_level\">1</U>", "<U n=\"entry_level\">1</U>")
+        updated = updated.replace("<T n=\"career_track\">Adult</T>", "<T n=\"career_track\">Adult</T>")
+        updated = updated.replace("<U n=\"simoleon_pay\">500</U>", "<U n=\"simoleon_pay\">500</U>")
+        updated = updated.replace("<U n=\"performance_goal\">1000</U>", "<U n=\"performance_goal\">1000</U>")
+        updated = updated.replace("<T n=\"level_title\">Level 1</T>", "<T n=\"level_title\">Level 1</T>")
+        updated = updated.replace("<T n=\"display_name\">" + xml.stem + "</T>", "<T n=\"display_name\">" + xml.stem + "</T>")
+        updated = updated.replace("<T n=\"description\">Replace with " + xml.stem + " flavor text.</T>", "<T n=\"description\">Replace with " + xml.stem + " flavor text.</T>")
+        updated = updated.replace("<!-- " + xml.stem + " trait snippet -->", "<!-- " + xml.stem + " trait snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " buff snippet -->", "<!-- " + xml.stem + " buff snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " interaction snippet -->", "<!-- " + xml.stem + " interaction snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " event snippet -->", "<!-- " + xml.stem + " event snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " achievement snippet -->", "<!-- " + xml.stem + " achievement snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " aspiration snippet -->", "<!-- " + xml.stem + " aspiration snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " whim snippet -->", "<!-- " + xml.stem + " whim snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " club snippet -->", "<!-- " + xml.stem + " club snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " holiday snippet -->", "<!-- " + xml.stem + " holiday snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " loot action snippet -->", "<!-- " + xml.stem + " loot action snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " testset snippet -->", "<!-- " + xml.stem + " testset snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " relationship snippet -->", "<!-- " + xml.stem + " relationship snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " skill snippet -->", "<!-- " + xml.stem + " skill snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " motive snippet -->", "<!-- " + xml.stem + " motive snippet -->")
+        updated = updated.replace("<!-- " + xml.stem + " snippet -->", "<!-- " + xml.stem + " snippet -->")
+        if xml.stem.endswith("_aspiration"):
+            updated = re.sub(r"(<T n=\"aspiration_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_aspiration", "") + m.group(3), updated)
+        if xml.stem.endswith("_whim"):
+            updated = re.sub(r"(<T n=\"whim_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_whim", "") + m.group(3), updated)
+            updated = re.sub(r"(<T n=\"whim_description\">)(.+)(</T>)", lambda m: m.group(1) + "Replace with " + xml.stem.replace("_whim", "") + " flavor text." + m.group(3), updated)
+        if xml.stem.endswith("_club"):
+            updated = re.sub(r"(<T n=\"club_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_club", "") + m.group(3), updated)
+        if xml.stem.endswith("_holiday"):
+            updated = re.sub(r"(<T n=\"holiday_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_holiday", "") + m.group(3), updated)
+        if xml.stem.endswith("_loot_action"):
+            updated = re.sub(r"(<T n=\"loot_action_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_loot_action", "") + m.group(3), updated)
+        if xml.stem.endswith("_testset"):
+            updated = re.sub(r"(<T n=\"test_set_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_testset", "") + m.group(3), updated)
+        if xml.stem.endswith("_relationship"):
+            updated = re.sub(r"(<T n=\"relationship_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_relationship", "") + m.group(3), updated)
+        if xml.stem.endswith("_skill"):
+            updated = re.sub(r"(<T n=\"skill_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_skill", "") + m.group(3), updated)
+        if xml.stem.endswith("_motive"):
+            updated = re.sub(r"(<T n=\"motive_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_motive", "") + m.group(3), updated)
+        if updated != txt:
+            _write(xml, updated)
+            touched.append(str(xml.relative_to(proj)))
+        map_content = _rewrite_stbl_placeholders(xml.stem, txt)[1]
+        if map_content:
+            loc_dir = proj / "src" / "localization"
+            _write(loc_dir / f"stbl_{xml.stem}.txt", map_content)
+            touched.append(str((loc_dir / f"stbl_{xml.stem}.txt").relative_to(proj)))
+    rows = _meta_block("verified", "Tuned IDs", f"{len(touched)} file(s)")
+    if touched:
+        rows += ["", "Updated:"] + [f"  - {item}" for item in sorted(set(touched))[:20]]
+    print(_status_panel("tune-ids", rows, command="tune-ids"))
+    _advance_pipeline_if_artifact(proj, "tmp/tune_ids_report.txt")
+    return 0
+
+
+def _cmd_wizard(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print_help(is_subcommand=True, command="wizard", error="Expected: wizard <mod_type> [name]")
+        return 2
+    mod_type = argv[1]
+    name = argv[2] if len(argv) > 2 and not argv[2].startswith("--") else ""
+    cli_params = _parse_kv_tokens(argv[3:] if name else argv[2:])
+    if not name:
+        name = cli_params.pop("name", "")
+    preset = wizard_presets(mod_type)
+    if not preset:
+        print_help(is_subcommand=True, command="wizard", error=f"Unknown mod type: {mod_type}")
+        return 2
+    # Note: on Windows, NUL//dev/null still reports isatty() True (character device),
+    # so require a real terminal on stdout as well before prompting.
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    mode = "answer prompts to scaffold" if interactive else "non-interactive: defaults + --param overrides"
+    print(_status_panel("wizard", [_meta_block("ok", f"Wizard: {mod_type}", mode)[0], ""], command="wizard"))
+
+    if not name:
+        if not interactive:
+            print(_status_panel("wizard", [_meta_block("fail", "Cancelled", "name is required (pass [name] or --param name=... non-interactively)")[0]], command="wizard"))
+            return 2
+        name = wizard_ask("Module/object name", "")
+        if not name:
+            print(_status_panel("wizard", [_meta_block("fail", "Cancelled", "name is required")[0]], command="wizard"))
+            return 2
+    try:
+        proj = _existing_project(".")
+    except SystemExit:
+        proj = init_project(name)
+
+    params: dict[str, str] = {}
+    for field_name in preset.get("params", []):
+        if field_name in cli_params:
+            params[field_name] = cli_params[field_name]
+            continue
+        default = preset.get("defaults", {}).get(field_name, "")
+        if not interactive:
+            if default:
+                params[field_name] = default
+            continue
+        value = wizard_ask(field_name, default)
+        if value:
+            params[field_name] = value
+    for key, value in cli_params.items():
+        params.setdefault(key, value)
+
+    factory = MOD_FACTORIES.get(mod_type)
+    if factory is None:
+        print(_status_panel("wizard", [_meta_block("fail", "Unknown mod type", mod_type)[0]], command="wizard"))
+        return 2
+
+    d = factory(proj, name)
+    _apply_params(proj, mod_type, name, params)
+    changelog = proj / "CHANGELOG.md"
+    if not changelog.exists():
+        today = datetime.now().strftime("%Y-%m-%d")
+        _write(changelog, f"# Changelog\n\n## {today}\n- Wizard scaffolded {mod_type}: {name}.\n")
+
+    advice = compatibility_advice(mod_type)
+    deps = dependency_notes(mod_type)
+    panel = [
+        _meta_block("verified", "Wizard Complete", f"{mod_type}: {name}")[0],
+        f"Path: {d}",
+        "",
+        f"{C_BOLD_WHITE}Brain Advice:{C_RESET}",
+        f"  {advice}",
+        "",
+        f"{C_BOLD_WHITE}Dependencies:{C_RESET}",
+    ] + [f"  - {item}" for item in deps] + [
+        "",
+        f"{C_BOLD_WHITE}Next Steps:{C_RESET}",
+    ] + [f"  - {item}" for item in preset.get("next_steps", [])]
+    print(_status_panel("wizard", panel, command="wizard"))
+    _advance_pipeline_if_artifact(proj, f"src/{mod_type}")
+    _advance_pipeline_if_artifact(proj, "CHANGELOG.md")
+    return 0
+
+
+COMMANDS: dict[str, Command] = {
+    entry.name: entry
+    for entry in [
+        Command(
+            "init",
+            _cmd_init,
+            args=["  name       Project directory / mod name"],
+            help_lines=["  init <name>           Initialize a new mod project.                            \033[1;32m[VERIFIED]\033[0m"],
+        ),
+        Command(
+            "new",
+            _cmd_new,
+            args=[
+                "  where      Existing project path",
+                "  kind       xml_snippet|ts4script|package|career|trait|buff|interaction|event|achievement|aspiration|whim|club|holiday|loot_action|testset|relationship|skill|motive",
+                "  name       Artifact/module name",
+            ],
+            help_lines=[
+                "  new <where> <kind>    Create xml_snippet, ts4script, package, career, trait, buff, interaction, event, or achievement artifact.      \033[1;32m[VERIFIED]\033[0m",
+                "                       <kind>: xml_snippet | ts4script | package | career | trait | buff | interaction | event | achievement | aspiration | whim | club | holiday | loot_action | testset | relationship | skill | motive",
+            ],
+        ),
+        Command(
+            "validate",
+            _cmd_validate,
+            args=["  path       Project path, default '.'.", "  --strict   Treat template values as errors."],
+            help_lines=["  validate [path]       Validate XML/packaging hygiene.                         \033[1;32m[VERIFIED]\033[0m"],
+        ),
+        Command(
+            "build",
+            _cmd_build,
+            args=["  path       Project path, default '.'.", "  --release  Use release packaging semantics (same output as 'package')."],
+            help_lines=["  build [path]          Package current artifacts into a release zip.           \033[1;32m[VERIFIED]\033[0m"],
+        ),
+        Command(
+            "package",
+            _cmd_package,
+            args=["  path       Project path, default '.'.", "  --out-dir  Output directory for release zip."],
+            help_lines=["  package [path]        Create release zip excluding dist/tmp/.git.                \033[1;32m[VERIFIED]\033[0m"],
+        ),
+        Command(
+            "install",
+            _cmd_install,
+            args=[
+                "  path       Project path, default '.'.",
+                "  --to-dir   Mods root or custom directory.",
+                "  S4_MODS_DIR env var also overrides the auto-detected Mods folder.",
+            ],
+            help_lines=["  install [path]        Install project into your Mods folder.                  \033[1;33m[LOCAL]\033[0m"],
+        ),
+        Command(
+            "doctor",
+            _cmd_doctor,
+            help_lines=["  doctor                Run environment and path checks.                        \033[1;32m[VERIFIED]\033[0m"],
+        ),
+        Command(
+            "version",
+            _cmd_version,
+            help_lines=["  version               Print CLI version."],
+        ),
+        Command(
+            "help",
+            _cmd_help,
+            help_lines=["  help <cmd>            Show help for a subcommand."],
+        ),
+        Command(
+            "generate",
+            _cmd_generate,
+            args=["  mod_type   Supported mod type", "  name       Module or object name", "  --param k=v   Scalar tuning params, repeatable."],
+            help_lines=["  generate <type> <name> Generate a Sims 4 mod scaffold."],
+        ),
+        Command(
+            "wizard",
+            _cmd_wizard,
+            args=[
+                "  mod_type   Supported mod type",
+                "  name       Module or object name (required when non-interactive)",
+                "  --param k=v   Scalar tuning params, repeatable; skips the matching prompt.",
+            ],
+            help_lines=["  wizard <type> [name]     Guided mod creation with brain advice."],
+        ),
+        Command(
+            "changelog",
+            _cmd_changelog,
+            help_lines=["  changelog [path]         Add/update CHANGELOG.md."],
+        ),
+        Command("tune-ids", _cmd_tune_ids),
+        Command("pipeline", _cmd_pipeline),
+        Command("pipeline-next", _cmd_pipeline_next),
+        Command("pipeline-unlock", _cmd_pipeline_unlock),
+        Command("pipeline-reset", _cmd_pipeline_reset),
+        Command("game-python", _cmd_game_python),
+    ]
+}
+
 
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
@@ -1728,435 +2227,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     command = argv[0]
-
-    if command == "help":
-        target = argv[1] if len(argv) > 1 else "s4chemist_cli"
-        if target == "s4chemist_cli":
-            print_help(is_subcommand=False, command="")
-        else:
-            print_subcommand_help(target)
-        return 0
-
-    if command == "init":
-        if not argv[1:]:
-            print_help(is_subcommand=True, command="init", error="Missing <name> argument.")
-            return 2
-        proj = init_project(argv[1])
-        print(
-            _status_panel(
-                "init",
-                _meta_block("verified", "Ready", argv[1])
-                + [f"Files: {', '.join(PROJECT_FILES)}"],
-                command="init",
-            )
-        )
-        _advance_pipeline_if_artifact(proj, "s4modconfig.yaml")
-        _advance_pipeline_if_artifact(proj, "mod_notes.txt")
-        return 0
-
-    if command == "new":
-        if len(argv) < 4:
-            print_help(is_subcommand=True, command="new", error="Expected: new <where> <kind> <name>")
-            return 2
-        _, where, kind, name = argv[:4]
-        proj = _existing_project(where)
-        factory = {
-            "xml_snippet": new_xml_snippet,
-            "ts4script": new_ts4script,
-            "package": new_package_mod,
-            "career": new_career,
-            "trait": new_trait,
-            "buff": new_buff,
-            "interaction": new_interaction,
-            "event": new_event,
-            "achievement": new_achievement,
-            "aspiration": new_aspiration,
-            "whim": new_whim,
-            "club": new_club,
-            "holiday": new_holiday,
-            "loot_action": new_loot_action,
-            "testset": new_testset,
-            "relationship": new_relationship,
-            "skill": new_skill,
-            "motive": new_motive,
-        }.get(kind)
-        if factory is None:
-            print_help(is_subcommand=True, command="new", error=f"Unknown kind: {kind}")
-            return 2
-        print(_status_panel("new", _meta_block("verified", "Created", kind) + [f"Path: {factory(proj, name)}"], command="new"))
-        _advance_pipeline_if_artifact(proj, f"src/{kind}")
-        _advance_pipeline_if_artifact(proj, "src/xml_snippets")
-        _advance_pipeline_if_artifact(proj, "src/ts4script")
-        _advance_pipeline_if_artifact(proj, "src/package")
-        return 0
-
-    if command == "validate":
-        path = argv[1] if len(argv) > 1 else "."
-        strict = "--strict" in argv
-        proj = _existing_project(path)
-        issues = validate_project(proj, strict=strict)
-        state = "ok" if issues == 0 else "fail"
-        print(_status_panel("validate", _meta_block(state, "Validation", f"{issues} issue{'s' if issues != 1 else ''}"), command="validate"))
-        _advance_pipeline_if_artifact(proj, "docs/validation_report.txt")
-        _advance_pipeline_if_artifact(proj, "tmp/lint_report.txt")
-        return issues
-
-    if command == "build":
-        path = argv[1] if len(argv) > 1 else "."
-        release = "--release" in argv
-        proj = _existing_project(path)
-        out = build_project(proj, release=release)
-        print(_status_panel("build", _meta_block("verified", "Built", str(out)), command="build"))
-        _advance_pipeline_if_artifact(proj, "dist")
-        return 0
-
-    if command == "package":
-        path = argv[1] if len(argv) > 1 else "."
-        out_dir = None
-        if "--out-dir" in argv:
-            idx = argv.index("--out-dir")
-            if idx + 1 < len(argv):
-                out_dir = argv[idx + 1]
-        proj = _existing_project(path)
-        out = package_release(proj, out_dir=Path(out_dir) if out_dir else None)
-        print(_status_panel("package", _meta_block("verified", "Packaged", str(out)), command="package"))
-        _advance_pipeline_if_artifact(proj, "dist")
-        _advance_pipeline_if_artifact(proj, "tmp/release_manifest.txt")
-        return 0
-
-    if command == "install":
-        path = argv[1] if len(argv) > 1 else "."
-        to_dir = None
-        if "--to-dir" in argv:
-            idx = argv.index("--to-dir")
-            if idx + 1 < len(argv):
-                to_dir = argv[idx + 1]
-        target = install_to_mods(_existing_project(path), mods_dir=to_dir)
-        print(_status_panel("install", _meta_block("local", "Installed", str(target)), command="install"))
-        return 0
-
-    if command == "doctor":
-        return doctor_check()
-
-    if command == "version":
-        print(_status_panel("version", _meta_block("ok", "Version", "s4chemist_cli v0.1.1"), command="version"))
-        return 0
-
-    if command == "pipeline":
-        if len(argv) > 1 and argv[1] == "tune":
-            phase = argv[2] if len(argv) > 2 else None
-            path = argv[3] if len(argv) > 3 and argv[2] else argv[2] if len(argv) > 2 else "."
-            if phase not in PIPELINE_PHASES:
-                print_help(is_subcommand=True, command="pipeline", error="Expected: pipeline tune <phase> [path]")
-                return 2
-            proj = _existing_project(path)
-            meta = PIPELINE_META.get(phase, {})
-            rows = _meta_block("ok", f"Tune: {meta.get('name', phase)}", meta.get("hint", ""))
-            rows += ["", f"{C_BOLD_WHITE}Example:{C_RESET}", f"  - {meta.get('next', '')}", f"{C_BOLD_WHITE}Artifact:{C_RESET} {meta.get('artifact', '')}"]
-            print(_status_panel("pipeline-tune", rows, command="pipeline tune"))
-            return 0
-        path = argv[1] if len(argv) > 1 else "."
-        proj = _existing_project(path)
-        print(print_pipeline_status(proj))
-        return 0
-
-    if command == "pipeline-next":
-        path = argv[1] if len(argv) > 1 else "."
-        proj = _existing_project(path)
-        print(print_pipeline_next(proj))
-        return 0
-
-    if command == "pipeline-unlock":
-        path = argv[1] if len(argv) > 1 else "."
-        proj = _existing_project(path)
-        print(unlock_current_phase(proj))
-        return 0
-
-    if command == "pipeline-reset":
-        path = argv[1] if len(argv) > 1 else "."
-        proj = _existing_project(path)
-        print(reset_pipeline(proj))
-        return 0
-
-    if command == "game-python":
-        ensure_game_python()
-        return 0
-
-    if command == "generate":
-        if len(argv) < 3:
-            print_help(is_subcommand=True, command="generate", error="Expected: generate <mod_type> <name>")
-            return 2
-        mod_type = argv[1]
-        name = argv[2]
-        params = _parse_kv_tokens(argv[3:])
-        factory = {
-            "xml_snippet": new_xml_snippet,
-            "ts4script": new_ts4script,
-            "package": new_package_mod,
-            "career": new_career,
-            "trait": new_trait,
-            "buff": new_buff,
-            "interaction": new_interaction,
-            "event": new_event,
-            "achievement": new_achievement,
-            "aspiration": new_aspiration,
-            "whim": new_whim,
-            "club": new_club,
-            "holiday": new_holiday,
-            "loot_action": new_loot_action,
-            "testset": new_testset,
-            "relationship": new_relationship,
-            "skill": new_skill,
-            "motive": new_motive,
-        }.get(mod_type)
-        if factory is None:
-            print_help(is_subcommand=True, command="generate", error=f"Unknown mod type: {mod_type}")
-            return 2
-
-        try:
-            proj = _existing_project(".")
-        except SystemExit:
-            proj = _find_or_create_temp_project(name)
-
-        d = factory(proj, name)
-        _apply_params(proj, mod_type, name, params)
-        preset = wizard_presets(mod_type)
-        advice = compatibility_advice(mod_type)
-        deps = dependency_notes(mod_type)
-        note_kv = {k.replace("note.", "", 1): v for k, v in params.items() if k.startswith("note.")}
-        if note_kv:
-            state = load_pipeline_state(proj)
-            state.setdefault("notes", {}).update(note_kv)
-            save_pipeline_state(proj, state)
-        panel = [
-            _meta_block("verified", "Generated", f"{mod_type}: {name}")[0],
-            f"Path: {d}",
-            "",
-            f"{C_BOLD_WHITE}Brain Advice:{C_RESET}",
-            f"  {advice}",
-            "",
-            f"{C_BOLD_WHITE}Dependencies:{C_RESET}",
-        ] + [f"  - {item}" for item in deps] + [
-            "",
-            f"{C_BOLD_WHITE}Next Steps:{C_RESET}",
-        ] + [f"  - {item}" for item in preset.get("next_steps", [])]
-        _advance_pipeline_if_artifact(proj, f"src/{mod_type}")
-        _advance_pipeline_if_artifact(proj, "src/xml_snippets")
-        _advance_pipeline_if_artifact(proj, "src/ts4script")
-        _advance_pipeline_if_artifact(proj, "src/package")
-        if note_kv:
-            panel += [
-                "",
-                f"{C_BOLD_WHITE}Pipeline Notes Saved:{C_RESET}",
-            ] + [f"  {k}: {v}" for k, v in note_kv.items()]
-        print(_status_panel("generate", panel, command="generate"))
-        return 0
-
-    if command == "changelog":
-        path = argv[1] if len(argv) > 1 else "."
-        try:
-            proj = _existing_project(path)
-        except SystemExit:
-            print_help(is_subcommand=True, command="changelog", error=f"Not a valid project: {path}")
-            return 2
-        changelog = proj / "CHANGELOG.md"
-        today = datetime.now().strftime("%Y-%m-%d")
-        content = f"# Changelog\n\n## {today}\n- Initial scaffold.\n"
-        if changelog.exists():
-            content = changelog.read_text(encoding="utf-8") + "\n" + content
-        _write(changelog, content)
-        print(_status_panel("changelog", _meta_block("verified", "Created", str(changelog)), command="changelog"))
-        _advance_pipeline_if_artifact(proj, "CHANGELOG.md")
-        return 0
-
-    if command == "tune-ids":
-        if len(argv) < 2:
-            print_help(is_subcommand=True, command="tune-ids", error="Expected: tune-ids <path>")
-            return 2
-        proj = _existing_project(argv[1])
-        touched = []
-        for xml in sorted(proj.rglob("*.xml")):
-            txt = xml.read_text(encoding="utf-8", errors="ignore")
-            updated = txt
-            updated, _ = _rewrite_stbl_placeholders(xml.stem, updated)
-            updated = updated.replace('<I d="0x00000000">', '<I d="' + _tuning_instance(xml.stem) + '">')
-            updated = updated.replace("<I d=\"0x00000000\">", "<I d=\"" + _tuning_instance(xml.stem) + "\">")
-            updated = updated.replace("<T n=\"career_icon\">0x00000000</T>", "<T n=\"career_icon\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
-            updated = updated.replace("<T n=\"display_name\">0x00000000</T>", "<T n=\"display_name\">" + _tuning_instance(xml.stem, "_display") + "</T>")
-            updated = updated.replace("<T n=\"description\">0x00000000</T>", "<T n=\"description\">" + _tuning_instance(xml.stem, "_desc") + "</T>")
-            updated = updated.replace("<T n=\"icon_resource\">0x00000000</T>", "<T n=\"icon_resource\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
-            updated = updated.replace("<U n=\"club_icon\">0x00000000</U>", "<U n=\"club_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
-            updated = updated.replace("<U n=\"holiday_icon\">0x00000000</U>", "<U n=\"holiday_icon\">" + _tuning_instance(xml.stem, "_icon") + "</U>")
-            idx = 0
-            def _replace_u(match):
-                nonlocal idx
-                suffix = f"_item{idx}"
-                idx += 1
-                return "<U>" + _tuning_instance(xml.stem, suffix) + "</U>"
-            updated = re.sub(r"<U>0x00000000</U>", _replace_u, updated)
-            updated = updated.replace("<T n=\"trait_facial_priority\">0</T>", "<T n=\"trait_facial_priority\">" + str(_fnv1a_64(xml.stem) & 0xFFFFFFFF) + "</T>")
-            updated = updated.replace("<U n=\"mood_weight\">1</U>", "<U n=\"mood_weight\">1</U>")
-            updated = updated.replace("<T n=\"animation_style\">None</T>", "<T n=\"animation_style\">None</T>")
-            updated = updated.replace("<U n=\"interaction_distance\">0</U>", "<U n=\"interaction_distance\">" + str(_fnv1a_64(xml.stem + "_distance") & 0xFFFFFFFF) + "</U>")
-            updated = updated.replace("<T n=\"pie_menu_priority\">0</T>", "<T n=\"pie_menu_priority\">" + str(_fnv1a_64(xml.stem + "_menu") & 0xFFFFFFFF) + "</T>")
-            updated = updated.replace("<T n=\"event_name\">" + xml.stem + "</T>", "<T n=\"event_name\">" + xml.stem + "</T>")
-            updated = updated.replace("<U n=\"duration\">120</U>", "<U n=\"duration\">120</U>")
-            updated = updated.replace("<U n=\"hidden\">0</U>", "<U n=\"hidden\">0</U>")
-            updated = updated.replace("<U n=\"entry_level\">1</U>", "<U n=\"entry_level\">1</U>")
-            updated = updated.replace("<T n=\"career_track\">Adult</T>", "<T n=\"career_track\">Adult</T>")
-            updated = updated.replace("<U n=\"simoleon_pay\">500</U>", "<U n=\"simoleon_pay\">500</U>")
-            updated = updated.replace("<U n=\"performance_goal\">1000</U>", "<U n=\"performance_goal\">1000</U>")
-            updated = updated.replace("<T n=\"level_title\">Level 1</T>", "<T n=\"level_title\">Level 1</T>")
-            updated = updated.replace("<T n=\"display_name\">" + xml.stem + "</T>", "<T n=\"display_name\">" + xml.stem + "</T>")
-            updated = updated.replace("<T n=\"description\">Replace with " + xml.stem + " flavor text.</T>", "<T n=\"description\">Replace with " + xml.stem + " flavor text.</T>")
-            updated = updated.replace("<!-- " + xml.stem + " trait snippet -->", "<!-- " + xml.stem + " trait snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " buff snippet -->", "<!-- " + xml.stem + " buff snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " interaction snippet -->", "<!-- " + xml.stem + " interaction snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " event snippet -->", "<!-- " + xml.stem + " event snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " achievement snippet -->", "<!-- " + xml.stem + " achievement snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " aspiration snippet -->", "<!-- " + xml.stem + " aspiration snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " whim snippet -->", "<!-- " + xml.stem + " whim snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " club snippet -->", "<!-- " + xml.stem + " club snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " holiday snippet -->", "<!-- " + xml.stem + " holiday snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " loot action snippet -->", "<!-- " + xml.stem + " loot action snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " testset snippet -->", "<!-- " + xml.stem + " testset snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " relationship snippet -->", "<!-- " + xml.stem + " relationship snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " skill snippet -->", "<!-- " + xml.stem + " skill snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " motive snippet -->", "<!-- " + xml.stem + " motive snippet -->")
-            updated = updated.replace("<!-- " + xml.stem + " snippet -->", "<!-- " + xml.stem + " snippet -->")
-            if xml.stem.endswith("_aspiration"):
-                updated = re.sub(r"(<T n=\"aspiration_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_aspiration", "") + m.group(3), updated)
-            if xml.stem.endswith("_whim"):
-                updated = re.sub(r"(<T n=\"whim_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_whim", "") + m.group(3), updated)
-                updated = re.sub(r"(<T n=\"whim_description\">)(.+)(</T>)", lambda m: m.group(1) + "Replace with " + xml.stem.replace("_whim", "") + " flavor text." + m.group(3), updated)
-            if xml.stem.endswith("_club"):
-                updated = re.sub(r"(<T n=\"club_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_club", "") + m.group(3), updated)
-            if xml.stem.endswith("_holiday"):
-                updated = re.sub(r"(<T n=\"holiday_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_holiday", "") + m.group(3), updated)
-            if xml.stem.endswith("_loot_action"):
-                updated = re.sub(r"(<T n=\"loot_action_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_loot_action", "") + m.group(3), updated)
-            if xml.stem.endswith("_testset"):
-                updated = re.sub(r"(<T n=\"test_set_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_testset", "") + m.group(3), updated)
-            if xml.stem.endswith("_relationship"):
-                updated = re.sub(r"(<T n=\"relationship_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_relationship", "") + m.group(3), updated)
-            if xml.stem.endswith("_skill"):
-                updated = re.sub(r"(<T n=\"skill_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_skill", "") + m.group(3), updated)
-            if xml.stem.endswith("_motive"):
-                updated = re.sub(r"(<T n=\"motive_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_motive", "") + m.group(3), updated)
-            if updated != txt:
-                _write(xml, updated)
-                touched.append(str(xml.relative_to(proj)))
-            map_content = _rewrite_stbl_placeholders(xml.stem, txt)[1]
-            if map_content:
-                loc_dir = proj / "src" / "localization"
-                _write(loc_dir / f"stbl_{xml.stem}.txt", map_content)
-                touched.append(str((loc_dir / f"stbl_{xml.stem}.txt").relative_to(proj)))
-        rows = _meta_block("verified", "Tuned IDs", f"{len(touched)} file(s)")
-        if touched:
-            rows += ["", "Updated:"] + [f"  - {item}" for item in sorted(set(touched))[:20]]
-        print(_status_panel("tune-ids", rows, command="tune-ids"))
-        _advance_pipeline_if_artifact(proj, "tmp/tune_ids_report.txt")
-        return 0
-
-    if command == "wizard":
-        if len(argv) < 2:
-            print_help(is_subcommand=True, command="wizard", error="Expected: wizard <mod_type> [name]")
-            return 2
-        mod_type = argv[1]
-        name = argv[2] if len(argv) > 2 else ""
-        preset = wizard_presets(mod_type)
-        if not preset:
-            print_help(is_subcommand=True, command="wizard", error=f"Unknown mod type: {mod_type}")
-            return 2
-        print(_status_panel("wizard", [_meta_block("ok", f"Wizard: {mod_type}", "answer prompts to scaffold")[0], ""], command="wizard"))
-
-        if not name:
-            name = wizard_ask("Module/object name", "")
-            if not name:
-                print(_status_panel("wizard", [_meta_block("fail", "Cancelled", "name is required")[0]], command="wizard"))
-                return 2
-        try:
-            proj = _existing_project(".")
-        except SystemExit:
-            proj = init_project(name)
-
-        params: dict[str, str] = {}
-        for field in preset.get("params", []):
-            default = preset.get("defaults", {}).get(field, "")
-            value = wizard_ask(field, default)
-            if value:
-                params[field] = value
-
-        factory = {
-            "xml_snippet": new_xml_snippet,
-            "ts4script": new_ts4script,
-            "package": new_package_mod,
-            "career": new_career,
-            "trait": new_trait,
-            "buff": new_buff,
-            "interaction": new_interaction,
-            "event": new_event,
-            "achievement": new_achievement,
-            "aspiration": new_aspiration,
-            "whim": new_whim,
-            "club": new_club,
-            "holiday": new_holiday,
-            "loot_action": new_loot_action,
-            "testset": new_testset,
-            "relationship": new_relationship,
-            "skill": new_skill,
-            "motive": new_motive,
-        }.get(mod_type)
-        if factory is None:
-            print(_status_panel("wizard", [_meta_block("fail", "Unknown mod type", mod_type)[0]], command="wizard"))
-            return 2
-
-        d = factory(proj, name)
-        _apply_params(proj, mod_type, name, params)
-        changelog = proj / "CHANGELOG.md"
-        if not changelog.exists():
-            today = datetime.now().strftime("%Y-%m-%d")
-            _write(changelog, f"# Changelog\n\n## {today}\n- Wizard scaffolded {mod_type}: {name}.\n")
-
-        advice = compatibility_advice(mod_type)
-        deps = dependency_notes(mod_type)
-        panel = [
-            _meta_block("verified", "Wizard Complete", f"{mod_type}: {name}")[0],
-            f"Path: {d}",
-            "",
-            f"{C_BOLD_WHITE}Brain Advice:{C_RESET}",
-            f"  {advice}",
-            "",
-            f"{C_BOLD_WHITE}Dependencies:{C_RESET}",
-        ] + [f"  - {item}" for item in deps] + [
-            "",
-            f"{C_BOLD_WHITE}Next Steps:{C_RESET}",
-        ] + [f"  - {item}" for item in preset.get("next_steps", [])]
-        print(_status_panel("wizard", panel, command="wizard"))
-        _advance_pipeline_if_artifact(proj, f"src/{mod_type}")
-        _advance_pipeline_if_artifact(proj, "CHANGELOG.md")
-        return 0
-
-    if command == "pipeline":
-        if len(argv) > 1 and argv[1] == "tune":
-            phase = argv[2] if len(argv) > 2 else None
-            path = argv[3] if len(argv) > 3 and argv[2] else argv[2] if len(argv) > 2 else "."
-            if phase not in PIPELINE_PHASES:
-                print_help(is_subcommand=True, command="pipeline", error="Expected: pipeline tune <phase> [path]")
-                return 2
-            proj = _existing_project(path)
-            meta = PIPELINE_META.get(phase, {})
-            rows = _meta_block("ok", f"Tune: {meta.get('name', phase)}", meta.get("hint", ""))
-            rows += ["", f"{C_BOLD_WHITE}Example:{C_RESET}", f"  - {meta.get('next', '')}", f"{C_BOLD_WHITE}Artifact:{C_RESET} {meta.get('artifact', '')}"]
-            print(_status_panel("pipeline-tune", rows, command="pipeline tune"))
-            return 0
-        path = argv[1] if len(argv) > 1 else "."
-        proj = _existing_project(path)
-        print(print_pipeline_status(proj))
-        return 0
-
-    print_help(is_subcommand=True, command=command, error=f"Unknown command: {command}")
-    return 2
+    entry = COMMANDS.get(command)
+    if entry is None:
+        print_help(is_subcommand=True, command=command, error=f"Unknown command: {command}")
+        return 2
+    return entry.handler(argv)
 
 
 if __name__ == "__main__":

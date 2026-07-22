@@ -1,0 +1,15 @@
+set -Eeuo pipefail
+
+test:
+	python -m pytest tests/ -v
+
+lint:
+	ruff check s4chemist_cli.py tests
+
+typecheck:
+	mypy s4chemist_cli.py
+
+package:
+	python s4chemist_cli.py package .
+	@echo "Release zips in:"
+	ls dist | sed -n '1,20p'
