@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- NeonLot club snippet -->
+<I d="0x56858df49810a7dd">
+  <T n="club_name">NeonLot</T>
+  <U n="club_icon">0x125bb4f8bf6c83f3</U>
+  <L n="club_rules">
+    <V t="club_rule"/>
+  </L>
+  <L n="member_preferences">
+    <V t="club_member_preference"/>
+  </L>
+</I>

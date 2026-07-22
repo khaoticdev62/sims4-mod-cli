@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- RouteMaster aspiration snippet -->
+<I d="0x2d2d9f9b5af91949">
+  <T n="aspiration_name">RouteMaster</T>
+  <S>routemaster_aspiration:STR_DESCRIPTION</S>
+  <U n="hidden">0</U>
+  <L n="milestones">
+    <V t="aspiration_milestone"/>
+  </L>
+</I>

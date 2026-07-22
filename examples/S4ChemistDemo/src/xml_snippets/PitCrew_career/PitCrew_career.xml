@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- PitCrew career snippet -->
+<I d="0x4478fa4c755cff8a">
+  <T n="career_name">PitCrew</T>
+  <T n="career_icon">0x2b75be4f152442be</T>
+  <U n="entry_level">1</U>
+  <T n="career_track">Adult</T>
+  <T n="career_levels">
+    <L n="career_levels">
+      <U>
+        <T n="level_title">Level 1</T>
+        <U n="simoleon_pay">500</U>
+        <U n="performance_goal">1000</U>
+      </U>
+    </L>
+  </T>
+</I>

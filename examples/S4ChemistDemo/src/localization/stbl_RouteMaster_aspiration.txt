@@ -1,0 +1,1 @@
+routemaster_aspiration:STR_DESCRIPTION=Replace with RouteMaster aspiration flavor text.

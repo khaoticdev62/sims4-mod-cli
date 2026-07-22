@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- caffeine_crash motive snippet -->
+<I d="0x3f9c60df0aa86791">
+  <T n="motive_name">caffeine_crash</T>
+  <U n="decay_rate">1</U>
+  <U n="threshold">100</U>
+  <L n="motive_buffs">
+    <U>0x2a681432a4f67f23</U>
+  </L>
+</I>

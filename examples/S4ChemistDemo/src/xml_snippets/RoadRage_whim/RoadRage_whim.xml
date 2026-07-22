@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- RoadRage whim snippet -->
+<I d="0x648304b55be67ee2">
+  <T n="whim_name">RoadRage</T>
+  <T n="whim_description">Replace with RoadRage flavor text.</T>
+  <U n="priority">1</U>
+  <U n="duration">120</U>
+  <L n="related_buffs">
+    <U>0xd63e5f41bbd7cf0</U>
+  </L>
+</I>
