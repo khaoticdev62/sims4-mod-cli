@@ -10,6 +10,7 @@ CLI = REPO_ROOT / "s4chemist_cli.py"
 VISIBLE_COMMANDS = [
     "init", "new", "validate", "build", "package", "install",
     "doctor", "version", "help", "generate", "wizard", "changelog",
+    "doctor-mod", "repair-placeholders",
 ]
 
 

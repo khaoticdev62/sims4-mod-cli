@@ -147,12 +147,67 @@ def test_validate_strict_flags_bad_localization(tmp_project):
     assert "key=value line" in stdout
 
 
+def test_validate_strict_flags_duplicate_localization_key(tmp_project):
+    loc = tmp_project / "src" / "localization"
+    loc.mkdir(parents=True)
+    (loc / "stbl_a.txt").write_text("same=value one\n", encoding="utf-8")
+    (loc / "stbl_b.txt").write_text("same=value two\n", encoding="utf-8")
+    stdout, _, rc = run_cli(["validate", str(tmp_project), "--strict"], REPO_ROOT)
+    assert rc >= 1
+    assert "duplicate localization key" in stdout
+
+
+def test_validate_strict_flags_missing_stbl_key(tmp_project):
+    xml_dir = tmp_project / "src" / "xml_snippets" / "MissingLoc_trait"
+    xml_dir.mkdir(parents=True)
+    (xml_dir / "MissingLoc_trait.xml").write_text(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<I d=\"1\">\n"
+        "  <T n=\"trait_name\">MissingLoc</T>\n"
+        "  <T n=\"trait_type\">PERSONALITY</T>\n"
+        "  <T n=\"display_name\"><S>missing:key</S></T>\n"
+        "</I>\n",
+        encoding="utf-8",
+    )
+    stdout, _, rc = run_cli(["validate", str(tmp_project), "--strict"], REPO_ROOT)
+    assert rc >= 1
+    assert "missing STBL key 'missing:key'" in stdout
+
+
 def test_validate_strict_flags_uncompiled_package_template(tmp_project, repo_root):
     from tests.utils import cli_runner
     cli_runner(["new", str(tmp_project), "package", "PkgStub"], repo_root)
     stdout, _, rc = run_cli(["validate", str(tmp_project), "--strict"], REPO_ROOT)
     assert rc >= 1
     assert "package.template" in stdout
+
+
+def test_repair_placeholders_fixes_strict_interaction_loop(tmp_project, repo_root):
+    from tests.utils import cli_runner
+    cli_runner(["new", str(tmp_project), "interaction", "RepairInteraction"], repo_root)
+    xml = tmp_project / "src" / "xml_snippets" / "RepairInteraction_interaction" / "RepairInteraction_interaction.xml"
+    xml.write_text(
+        xml.read_text(encoding="utf-8").replace("</I>", "  <T n=\"description\">Replace with interaction flavor text.</T>\n</I>"),
+        encoding="utf-8",
+    )
+    stdout, _, rc = run_cli(["repair-placeholders", str(tmp_project)], REPO_ROOT)
+    assert rc == 0
+    assert "Repaired placeholders" in stdout
+    assert (tmp_project / "src" / "localization" / "stbl_index.txt").exists()
+    assert "Replace with" not in xml.read_text(encoding="utf-8")
+    stdout, _, rc = run_cli(["validate", str(tmp_project), "--strict"], REPO_ROOT)
+    assert rc == 0, stdout
+
+
+def test_doctor_mod_reports_missing_script_manifest(tmp_project, repo_root):
+    from tests.utils import cli_runner
+    cli_runner(["new", str(tmp_project), "ts4script", "NeedsManifest"], repo_root)
+    manifest = tmp_project / "src" / "ts4script" / "NeedsManifest" / "manifest.json"
+    manifest.unlink()
+    stdout, _, rc = run_cli(["doctor-mod", str(tmp_project)], REPO_ROOT)
+    assert rc == 1
+    assert "missing manifest.json" in stdout
+    assert "Next Action" in stdout
 
 
 def test_package_writes_manifest_and_notes(tmp_project, repo_root):
