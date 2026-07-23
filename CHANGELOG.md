@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.1 — 2026-07-22
+
+### Changed
+- Hidden commands are now first-class: `tune-ids`, `pipeline`, `pipeline-next`,
+  `pipeline-unlock`, `pipeline-reset`, and `game-python` appear in the help table, the
+  arrow-key menu (with path prompts), and REPL completion.
+
+### Fixed
+- Removed 27 dead self-replacement lines and a duplicated replacement in `tune-ids`
+  (flagged by the E2E audit; behavior unchanged — E2E still verifies zero `0x00000000`
+  remains after tuning).
+
 ## 0.10.0 — 2026-07-22
 
 ### Added

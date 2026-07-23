@@ -34,7 +34,7 @@ if sys.stdout.encoding and sys.stdout.encoding.upper() != "UTF-8":
     except (AttributeError, UnicodeError):
         pass
 
-__version__ = "0.10.0"
+__version__ = "0.10.1"
 
 PIPELINE_PHASES = [
     "concept",
@@ -2162,7 +2162,6 @@ def _cmd_tune_ids(argv: list[str]) -> int:
         updated = txt
         updated, _ = _rewrite_stbl_placeholders(xml.stem, updated)
         updated = updated.replace('<I d="0x00000000">', '<I d="' + _tuning_instance(xml.stem) + '">')
-        updated = updated.replace("<I d=\"0x00000000\">", "<I d=\"" + _tuning_instance(xml.stem) + "\">")
         updated = updated.replace("<T n=\"career_icon\">0x00000000</T>", "<T n=\"career_icon\">" + _tuning_instance(xml.stem, "_icon") + "</T>")
         updated = updated.replace("<T n=\"display_name\">0x00000000</T>", "<T n=\"display_name\">" + _tuning_instance(xml.stem, "_display") + "</T>")
         updated = updated.replace("<T n=\"description\">0x00000000</T>", "<T n=\"description\">" + _tuning_instance(xml.stem, "_desc") + "</T>")
@@ -2177,35 +2176,8 @@ def _cmd_tune_ids(argv: list[str]) -> int:
             return "<U>" + _tuning_instance(xml.stem, suffix) + "</U>"
         updated = re.sub(r"<U>0x00000000</U>", _replace_u, updated)
         updated = updated.replace("<T n=\"trait_facial_priority\">0</T>", "<T n=\"trait_facial_priority\">" + str(_fnv1a_64(xml.stem) & 0xFFFFFFFF) + "</T>")
-        updated = updated.replace("<U n=\"mood_weight\">1</U>", "<U n=\"mood_weight\">1</U>")
-        updated = updated.replace("<T n=\"animation_style\">None</T>", "<T n=\"animation_style\">None</T>")
         updated = updated.replace("<U n=\"interaction_distance\">0</U>", "<U n=\"interaction_distance\">" + str(_fnv1a_64(xml.stem + "_distance") & 0xFFFFFFFF) + "</U>")
         updated = updated.replace("<T n=\"pie_menu_priority\">0</T>", "<T n=\"pie_menu_priority\">" + str(_fnv1a_64(xml.stem + "_menu") & 0xFFFFFFFF) + "</T>")
-        updated = updated.replace("<T n=\"event_name\">" + xml.stem + "</T>", "<T n=\"event_name\">" + xml.stem + "</T>")
-        updated = updated.replace("<U n=\"duration\">120</U>", "<U n=\"duration\">120</U>")
-        updated = updated.replace("<U n=\"hidden\">0</U>", "<U n=\"hidden\">0</U>")
-        updated = updated.replace("<U n=\"entry_level\">1</U>", "<U n=\"entry_level\">1</U>")
-        updated = updated.replace("<T n=\"career_track\">Adult</T>", "<T n=\"career_track\">Adult</T>")
-        updated = updated.replace("<U n=\"simoleon_pay\">500</U>", "<U n=\"simoleon_pay\">500</U>")
-        updated = updated.replace("<U n=\"performance_goal\">1000</U>", "<U n=\"performance_goal\">1000</U>")
-        updated = updated.replace("<T n=\"level_title\">Level 1</T>", "<T n=\"level_title\">Level 1</T>")
-        updated = updated.replace("<T n=\"display_name\">" + xml.stem + "</T>", "<T n=\"display_name\">" + xml.stem + "</T>")
-        updated = updated.replace("<T n=\"description\">Replace with " + xml.stem + " flavor text.</T>", "<T n=\"description\">Replace with " + xml.stem + " flavor text.</T>")
-        updated = updated.replace("<!-- " + xml.stem + " trait snippet -->", "<!-- " + xml.stem + " trait snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " buff snippet -->", "<!-- " + xml.stem + " buff snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " interaction snippet -->", "<!-- " + xml.stem + " interaction snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " event snippet -->", "<!-- " + xml.stem + " event snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " achievement snippet -->", "<!-- " + xml.stem + " achievement snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " aspiration snippet -->", "<!-- " + xml.stem + " aspiration snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " whim snippet -->", "<!-- " + xml.stem + " whim snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " club snippet -->", "<!-- " + xml.stem + " club snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " holiday snippet -->", "<!-- " + xml.stem + " holiday snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " loot action snippet -->", "<!-- " + xml.stem + " loot action snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " testset snippet -->", "<!-- " + xml.stem + " testset snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " relationship snippet -->", "<!-- " + xml.stem + " relationship snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " skill snippet -->", "<!-- " + xml.stem + " skill snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " motive snippet -->", "<!-- " + xml.stem + " motive snippet -->")
-        updated = updated.replace("<!-- " + xml.stem + " snippet -->", "<!-- " + xml.stem + " snippet -->")
         if xml.stem.endswith("_aspiration"):
             updated = re.sub(r"(<T n=\"aspiration_name\">)(.+)(</T>)", lambda m: m.group(1) + xml.stem.replace("_aspiration", "") + m.group(3), updated)
         if xml.stem.endswith("_whim"):
@@ -2863,12 +2835,47 @@ COMMANDS: dict[str, Command] = {
             usage="tui [path]",
             description="Open the full dashboard UI (Textual).",
         ),
-        Command("tune-ids", _cmd_tune_ids),
-        Command("pipeline", _cmd_pipeline),
-        Command("pipeline-next", _cmd_pipeline_next),
-        Command("pipeline-unlock", _cmd_pipeline_unlock),
-        Command("pipeline-reset", _cmd_pipeline_reset),
-        Command("game-python", _cmd_game_python),
+        Command(
+            "tune-ids",
+            _cmd_tune_ids,
+            args=["  path       Project path, default '.'.", "  Rewrites 0x00000000 tuning ids to stable generated ids."],
+            usage="tune-ids [path]",
+            description="Rewrite placeholder tuning ids to stable generated ids.",
+            status="verified",
+        ),
+        Command(
+            "pipeline",
+            _cmd_pipeline,
+            args=["  path       Project path, default '.'.", "  tune <phase> [path]   Show tuning guidance for a phase."],
+            usage="pipeline [path]",
+            description="Show phase-by-phase build pipeline status.",
+            status="verified",
+        ),
+        Command(
+            "pipeline-next",
+            _cmd_pipeline_next,
+            usage="pipeline-next [path]",
+            description="Show next actions for the current phase.",
+        ),
+        Command(
+            "pipeline-unlock",
+            _cmd_pipeline_unlock,
+            usage="pipeline-unlock [path]",
+            description="Mark current phase done and advance.",
+        ),
+        Command(
+            "pipeline-reset",
+            _cmd_pipeline_reset,
+            usage="pipeline-reset [path]",
+            description="Reset the pipeline back to concept.",
+        ),
+        Command(
+            "game-python",
+            _cmd_game_python,
+            usage="game-python",
+            description="Locate the game's bundled Python files.",
+            status="local",
+        ),
     ]
 }
 
@@ -3043,6 +3050,9 @@ def _menu_flow(command: str) -> list[str] | None:
     if command == "changelog":
         path = _menu_text("Project path", ".")
         return ["changelog", path] if path is not None else None
+    if command in ("pipeline", "pipeline-next", "pipeline-unlock", "pipeline-reset", "tune-ids"):
+        path = _menu_text("Project path", ".")
+        return [command, path] if path is not None else None
     if command == "help":
         target = _menu_select("Help for command", [e.name for e in COMMANDS.values() if e.description])
         return ["help", target] if target else None
